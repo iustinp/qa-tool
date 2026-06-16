@@ -1,0 +1,25 @@
+{
+  "name": "page-pair-diff",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Compare source vs target full-page screenshots with iterative AI segment/match and masking",
+  "main": "index.js",
+  "bin": {
+    "page-pair-diff": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "compare": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
+    "@aws-sdk/client-bedrock-runtime": "^3.787.0",
+    "dotenv": "^16.4.5",
+    "pixelmatch": "^5.3.0",
+    "playwright": "^1.40.0",
+    "sharp": "^0.33.5"
+  }
+}
