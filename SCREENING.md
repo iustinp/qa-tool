@@ -123,9 +123,28 @@ Card-row segments: expansion retry if too short; link-only fragments merge with 
 
 See `matchRejectReasons` on each iteration in `pair-report.json`.
 
+## Text match strictness (source line → target)
+
+Each source line is matched against the target in three escalating stages so that
+DOM-structure differences (common in migrations) don't cause false "missing":
+
+1. **exact** — normalized source line equals a normalized target line.
+2. **substring** — normalized source line (punctuation collapsed, ≥ 8 chars) appears
+   as a contiguous run in the flattened target text.
+3. **partial** — the longest contiguous run of source tokens found in the flattened
+   target covers ≥ `PPD_TEXT_MATCH_MIN_COVERAGE` (default **0.8**) of the line's tokens
+   (only for lines with ≥ `PPD_TEXT_MATCH_MIN_TOKENS` tokens, default **4**).
+
+Stage 3 handles inline links merged into a sentence by `innerText` (e.g. source
+`…do advance bookings online.` where the target splits `online` into its own node):
+the sentence still matches at ~0.93 coverage, while a genuinely absent sentence whose
+words are only scattered in the target stays below the threshold and is reported missing.
+`matchType` and `tokenCoverage` appear per line in `text-audit.json` (`matchedBy.partial`
+counts stage-3 matches).
+
 ## Limitations (v1)
 
-- Exact line match only (no fuzzy/Levenshtein).
+- Line match is exact → contiguous-substring → contiguous-token-coverage (no Levenshtein/fuzzy word edits).
 - Global downscaled image compare (no regional bands).
 - No OCR — image-heavy heroes may land in `needs_ai` (intended).
 - Restyled pages with same copy may be `needs_ai` (intended).
