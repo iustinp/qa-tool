@@ -55,6 +55,7 @@ function parseArgs(argv) {
     probeBedrock: false,
     noScreening: false,
     screeningOnly: false,
+    textOnly: false,
   };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
@@ -62,6 +63,7 @@ function parseArgs(argv) {
     else if (a === '--probe-bedrock') out.probeBedrock = true;
     else if (a === '--no-screening') out.noScreening = true;
     else if (a === '--screening-only') out.screeningOnly = true;
+    else if (a === '--text-only') out.textOnly = true;
     else if (a.startsWith('--csv=')) out.csv = a.slice(6);
     else if (a === '--csv') out.csv = argv[++i];
     else if (a.startsWith('--threads=')) out.threads = Math.max(1, parseInt(a.split('=')[1], 10) || 1);
@@ -159,6 +161,8 @@ USE_ANTHROPIC_API is not read; set ANTHROPIC_API_KEY and leave AWS_BEARER_TOKEN_
 Local pre-AI screening (after capture, before segment/match):
   --no-screening           Force AI for every pair (debug/regression)
   --screening-only         Capture + screening only; no Bedrock / no AI loop
+  --text-only              Capture + text audit only; no image screening, no Bedrock / no AI loop
+                             (writes text-audit.json + text-missing.csv; finishedReason "text_only")
 
   PPD_SCREENING=0          Disable screening (same as --no-screening)
   PPD_SCREEN_PASS_IMAGE_MIN          Min image similarity for pass (default 0.94)
@@ -181,6 +185,10 @@ Text audit expansion (symmetric UI clicks before text extract; used for text aud
   PPD_TEXT_EXPANSION_SETTLE_MS         Wait after each click in ms (default 300)
   PPD_TEXT_EXPANSION_SCOPE             main | body (default main — only click inside main landmark)
   PPD_DEBUG_TEXT_PROBE                 Optional substring probe; adds textExpansion.debug to artifacts
+
+Text match strictness (source line -> target, after exact + contiguous-substring):
+  PPD_TEXT_MATCH_MIN_COVERAGE          Min contiguous source-token coverage for a partial match (default 0.8)
+  PPD_TEXT_MATCH_MIN_TOKENS            Min source tokens before partial coverage applies (default 4)
 
 Block match strictness (before target stitch):
   PPD_MATCH_MIN_CONFIDENCE             Min confidence to accept (default 0.85)
@@ -249,15 +257,16 @@ async function main() {
     threads: args.threads,
     maxIterations: args.maxIterations,
     screeningOnly: args.screeningOnly,
+    textOnly: args.textOnly,
     noScreening: args.noScreening,
     cwd: process.cwd(),
   });
 
-  if (!args.screeningOnly) {
+  if (!args.screeningOnly && !args.textOnly) {
     await initializeClaudeClient();
   }
 
-  const rateLimiter = args.screeningOnly
+  const rateLimiter = args.screeningOnly || args.textOnly
     ? null
     : new RateLimiter({
         minDelayBetweenRequests: parseInt(process.env.PPD_MIN_DELAY_MS || '500', 10),
@@ -271,6 +280,7 @@ async function main() {
   console.log(`Debug log (not stdout): ${runLogger.path}`);
   console.log(`Pairs: ${rows.length}, threads: ${args.threads}`);
   if (args.screeningOnly) console.log('Mode: screening-only (no AI)');
+  if (args.textOnly) console.log('Mode: text-only (text comparison, no image screening / no AI)');
   if (args.noScreening) console.log('Mode: screening disabled (--no-screening)');
 
   const results = await runPool(rows, args.threads, async (pair, index) => {
@@ -281,6 +291,7 @@ async function main() {
       runLogger,
       skipScreening: args.noScreening,
       screeningOnly: args.screeningOnly,
+      textOnly: args.textOnly,
     });
     const line = JSON.stringify({
       slug: report.slug,
@@ -344,6 +355,7 @@ async function main() {
         maxIterations: args.maxIterations,
         pairCount: results.length,
         screeningOnly: args.screeningOnly,
+        textOnly: args.textOnly,
         noScreening: args.noScreening,
         results: results.map((r) => ({
           slug: r.slug,
