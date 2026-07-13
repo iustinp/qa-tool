@@ -85,6 +85,17 @@ Debug: `run-debug.log` events `screening_start`, `screening_done`, `visible_text
 | `PPD_SCREEN_FAIL_REQUIRE_ALL` | — | Set `1` to require all 3 fail signals |
 | `PPD_SCREEN_PASS_SKIP_AI` | off | Set `1` to skip segment/match on `pass` (legacy) |
 | `PPD_SCREEN_COMPARE_WIDTH` | `512` | Downscale width for pixelmatch |
+| `PPD_SCREEN_BANDS` | `8` | Horizontal bands for regional image diff (`0` disables) |
+| `PPD_SCREEN_BAND_CHANGED_MAX` | `0.9` | A band counts as "changed" below this similarity |
+
+## Regional (banded) image diff
+
+Screening also splits the compared image into `PPD_SCREEN_BANDS` horizontal bands
+and scores each, so we know **where** the pages differ, not just the overall
+similarity. This is **additive** — the pass/fail/needs_ai verdict still uses the
+global `imageSimilarity`. Per-band results (`imageBands`, `imageChangedBandCount`)
+appear in `screening.json` `scores`. Bands seed a future optimization: only send
+the changed regions to the AI (fewer/cheaper vision calls).
 
 ## Visible text extraction
 
@@ -145,7 +156,7 @@ counts stage-3 matches).
 ## Limitations (v1)
 
 - Line match is exact → contiguous-substring → contiguous-token-coverage (no Levenshtein/fuzzy word edits).
-- Global downscaled image compare (no regional bands).
+- Image compare is downscaled global similarity for the verdict, plus additive per-band regional scores (not yet used to gate vision).
 - No OCR — image-heavy heroes may land in `needs_ai` (intended).
 - Restyled pages with same copy may be `needs_ai` (intended).
 
