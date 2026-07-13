@@ -46,6 +46,17 @@ function textAuditSummaryFields(report) {
   };
 }
 
+function contentSummaryFields(report) {
+  const c = report.contentComparison;
+  const r = c?.rollup;
+  return {
+    aggregateScreeningVerdict: report.aggregateScreeningVerdict ?? null,
+    contentProfiles: c?.profiles ? c.profiles.join('|') : null,
+    contentMissingEntirelyCount: r?.missingEntirelyCount ?? 0,
+    contentViewportShiftedCount: r?.viewportShiftedCount ?? 0,
+  };
+}
+
 function parseArgs(argv) {
   const out = {
     csv: null,
@@ -336,6 +347,7 @@ async function main() {
       iterationCount: report.iterations ? report.iterations.length : 0,
       ...screeningSummaryFields(report),
       ...textAuditSummaryFields(report),
+      ...contentSummaryFields(report),
     });
     summaryStream.write(`${line}\n`);
     await runLogger.event(report.slug, 'pair_summary_line', {
@@ -369,6 +381,8 @@ async function main() {
     screeningSummaryCsv: 'screening-summary.csv',
     missingCsv: 'missing.csv',
     textMissingCsv: 'text-missing.csv',
+    contentMissingCsv: 'content-missing.csv',
+    screeningByProfileCsv: 'screening-by-profile.csv',
     extraOnTargetCsv: 'extra-on-target.csv',
     reorderedMatchesCsv: 'reordered-matches.csv',
   });
@@ -399,6 +413,7 @@ async function main() {
           iterationCount: (r.iterations && r.iterations.length) || 0,
           ...screeningSummaryFields(r),
           ...textAuditSummaryFields(r),
+          ...contentSummaryFields(r),
         })),
       },
       null,
@@ -532,6 +547,85 @@ async function main() {
     textMissingHeader + (textMissingBody ? `${textMissingBody}\n` : '')
   );
   console.log(`Wrote ${textMissingCsvPath} (${textMissingRows.length} rows)`);
+
+  // Content rollup: missing source copy split into missing-entirely (dropped
+  // from the target under every profile) vs viewport-shifted (present under a
+  // different profile). This is the reviewer-facing per-profile content result.
+  const contentRows = [];
+  for (const r of results) {
+    const rollup = r.contentComparison?.rollup;
+    if (!rollup || r.captureError) continue;
+    for (const m of rollup.missingEntirely || []) {
+      contentRows.push({
+        slug: r.slug,
+        classification: 'missing_entirely',
+        missingUnderProfile: m.missingUnderProfile || '',
+        sourceLine: m.sourceLine || '',
+        sourceUrl: r.sourceUrl,
+        targetUrl: r.targetUrl,
+      });
+    }
+    for (const m of rollup.viewportShifted || []) {
+      contentRows.push({
+        slug: r.slug,
+        classification: 'viewport_shifted',
+        missingUnderProfile: m.missingUnderProfile || '',
+        sourceLine: m.sourceLine || '',
+        sourceUrl: r.sourceUrl,
+        targetUrl: r.targetUrl,
+      });
+    }
+  }
+  const contentMissingCsvPath = path.join(outDir, 'content-missing.csv');
+  const contentMissingHeader =
+    'slug,classification,missingUnderProfile,sourceLine,sourceUrl,targetUrl\n';
+  const contentMissingBody = contentRows
+    .map(
+      (row) =>
+        `${csvEscape(row.slug)},${csvEscape(row.classification)},${csvEscape(row.missingUnderProfile)},${csvEscape(row.sourceLine)},${csvEscape(row.sourceUrl)},${csvEscape(row.targetUrl)}`
+    )
+    .join('\n');
+  fs.writeFileSync(
+    contentMissingCsvPath,
+    contentMissingHeader + (contentMissingBody ? `${contentMissingBody}\n` : '')
+  );
+  const entirelyCount = contentRows.filter((c) => c.classification === 'missing_entirely').length;
+  console.log(
+    `Wrote ${contentMissingCsvPath} (${contentRows.length} rows: ${entirelyCount} missing-entirely, ${contentRows.length - entirelyCount} viewport-shifted)`
+  );
+
+  // Per-profile screening verdicts (one row per pair per profile).
+  const screenProfileRows = [];
+  for (const r of results) {
+    if (!r.screeningByProfile || r.captureError) continue;
+    for (const [profile, s] of Object.entries(r.screeningByProfile)) {
+      screenProfileRows.push({
+        slug: r.slug,
+        profile,
+        verdict: s.verdict,
+        imageSimilarity: s.scores?.imageSimilarity ?? '',
+        textRecall: s.scores?.textRecall ?? '',
+        heightRatio: s.scores?.heightRatio ?? '',
+        aggregateVerdict: r.aggregateScreeningVerdict || '',
+        sourceUrl: r.sourceUrl,
+        targetUrl: r.targetUrl,
+      });
+    }
+  }
+  const screenProfileCsvPath = path.join(outDir, 'screening-by-profile.csv');
+  const screenProfileHeader =
+    'slug,profile,verdict,imageSimilarity,textRecall,heightRatio,aggregateVerdict,sourceUrl,targetUrl\n';
+  const screenProfileBody = screenProfileRows
+    .map(
+      (row) =>
+        `${csvEscape(row.slug)},${csvEscape(row.profile)},${csvEscape(row.verdict)},${row.imageSimilarity},${row.textRecall},${row.heightRatio},${csvEscape(row.aggregateVerdict)},${csvEscape(row.sourceUrl)},${csvEscape(row.targetUrl)}`
+    )
+    .join('\n');
+  fs.writeFileSync(
+    screenProfileCsvPath,
+    screenProfileHeader + (screenProfileBody ? `${screenProfileBody}\n` : '')
+  );
+  console.log(`Wrote ${screenProfileCsvPath} (${screenProfileRows.length} rows)`);
 }
 
 main().catch((e) => {
