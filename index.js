@@ -16,6 +16,7 @@ const { createRunLogger } = require('./lib/run-logger');
 const { initializeClaudeClient, probeBedrockAuth } = require('./lib/claude');
 const { processPair } = require('./lib/pair-worker');
 const { loadRecipe, DEFAULT_RECIPE } = require('./lib/recipe');
+const { createCacheStore, isCacheEnabled } = require('./lib/cache-store');
 
 function screeningSummaryFields(report) {
   const s = report.screening;
@@ -69,6 +70,7 @@ function parseArgs(argv) {
     screeningOnly: false,
     textOnly: false,
     recipe: null,
+    cache: null, // null => env default; true/false => explicit --cache/--no-cache
   };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
@@ -79,6 +81,8 @@ function parseArgs(argv) {
     else if (a === '--text-only') out.textOnly = true;
     else if (a.startsWith('--recipe=')) out.recipe = a.slice(9);
     else if (a === '--recipe') out.recipe = argv[++i];
+    else if (a === '--cache') out.cache = true;
+    else if (a === '--no-cache') out.cache = false;
     else if (a.startsWith('--csv=')) out.csv = a.slice(6);
     else if (a === '--csv') out.csv = argv[++i];
     else if (a.startsWith('--threads=')) out.threads = Math.max(1, parseInt(a.split('=')[1], 10) || 1);
@@ -142,6 +146,11 @@ CSV format (header optional):
 Optional per-site recipe (YAML) — see recipe.example.yaml and ROADMAP.md:
   --recipe <file>          Load ignore/mask/normalize rules, capture profiles, interaction
                              hints. Omitted => zero-config defaults (desktop profile only).
+
+Vision result cache (content-addressed by prompt + image bytes; reuses segment/match
+results for identical inputs across pages and re-runs):
+  --cache / --no-cache     Enable/disable (default off; PPD_CACHE=1 also enables)
+  PPD_CACHE_DIR            Cache location (default ./.ppd-cache)
 
 Environment: copy .env.example to .env in this package directory.
   Only that folder is loaded — not parent repo .env files.
@@ -282,6 +291,10 @@ async function main() {
     }
   }
 
+  // Persistent vision-result cache. Off unless --cache or PPD_CACHE=1 => parity.
+  const cacheEnabled = args.cache != null ? args.cache : isCacheEnabled();
+  const cacheStore = createCacheStore({ namespace: 'vision', enabled: cacheEnabled });
+
   const outDir =
     args.outDir ||
     path.join(process.cwd(), `page-pair-diff-run-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}`);
@@ -299,6 +312,8 @@ async function main() {
     noScreening: args.noScreening,
     recipePath: args.recipe || null,
     profiles: recipe.profiles,
+    cacheEnabled,
+    cacheDir: cacheEnabled ? cacheStore.dir : null,
     cwd: process.cwd(),
   });
 
@@ -322,6 +337,7 @@ async function main() {
   if (args.screeningOnly) console.log('Mode: screening-only (no AI)');
   if (args.textOnly) console.log('Mode: text-only (text comparison, no image screening / no AI)');
   if (args.noScreening) console.log('Mode: screening disabled (--no-screening)');
+  if (cacheEnabled) console.log(`Vision cache: on (${cacheStore.dir})`);
 
   const results = await runPool(rows, args.threads, async (pair, index) => {
     console.log(`\n[${index + 1}/${rows.length}] ${pair.source} → ${pair.target}`);
@@ -333,6 +349,7 @@ async function main() {
       screeningOnly: args.screeningOnly,
       textOnly: args.textOnly,
       profiles: recipe.profiles,
+      cacheStore,
     });
     const line = JSON.stringify({
       slug: report.slug,
@@ -385,8 +402,18 @@ async function main() {
     screeningByProfileCsv: 'screening-by-profile.csv',
     extraOnTargetCsv: 'extra-on-target.csv',
     reorderedMatchesCsv: 'reordered-matches.csv',
+    cacheStats: cacheEnabled ? cacheStore.stats() : null,
   });
   await runLogger.flush();
+
+  if (cacheEnabled) {
+    const cs = cacheStore.stats();
+    const total = cs.hits + cs.misses;
+    const rate = total ? ((cs.hits / total) * 100).toFixed(1) : '0.0';
+    console.log(
+      `Vision cache: ${cs.hits} hits / ${cs.misses} misses (${rate}% hit rate), ${cs.writes} writes`
+    );
+  }
 
   const summaryJson = path.join(outDir, 'summary.json');
   fs.writeFileSync(
