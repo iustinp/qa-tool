@@ -186,6 +186,10 @@ Text audit expansion (symmetric UI clicks before text extract; used for text aud
   PPD_TEXT_EXPANSION_SCOPE             main | body (default main — only click inside main landmark)
   PPD_DEBUG_TEXT_PROBE                 Optional substring probe; adds textExpansion.debug to artifacts
 
+Text match strictness (source line -> target, after exact + contiguous-substring):
+  PPD_TEXT_MATCH_MIN_COVERAGE          Min contiguous source-token coverage for a partial match (default 0.8)
+  PPD_TEXT_MATCH_MIN_TOKENS            Min source tokens before partial coverage applies (default 4)
+
 Block match strictness (before target stitch):
   PPD_MATCH_MIN_CONFIDENCE             Min confidence to accept (default 0.85)
   PPD_MATCH_MIN_CONFIDENCE_REORDERED   Min confidence if vertically misaligned (default 0.9)
