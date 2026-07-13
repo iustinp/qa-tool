@@ -15,6 +15,7 @@ const { RateLimiter } = require('./lib/rate-limiter');
 const { createRunLogger } = require('./lib/run-logger');
 const { initializeClaudeClient, probeBedrockAuth } = require('./lib/claude');
 const { processPair } = require('./lib/pair-worker');
+const { loadRecipe, DEFAULT_RECIPE } = require('./lib/recipe');
 
 function screeningSummaryFields(report) {
   const s = report.screening;
@@ -56,6 +57,7 @@ function parseArgs(argv) {
     noScreening: false,
     screeningOnly: false,
     textOnly: false,
+    recipe: null,
   };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
@@ -64,6 +66,8 @@ function parseArgs(argv) {
     else if (a === '--no-screening') out.noScreening = true;
     else if (a === '--screening-only') out.screeningOnly = true;
     else if (a === '--text-only') out.textOnly = true;
+    else if (a.startsWith('--recipe=')) out.recipe = a.slice(9);
+    else if (a === '--recipe') out.recipe = argv[++i];
     else if (a.startsWith('--csv=')) out.csv = a.slice(6);
     else if (a === '--csv') out.csv = argv[++i];
     else if (a.startsWith('--threads=')) out.threads = Math.max(1, parseInt(a.split('=')[1], 10) || 1);
@@ -118,11 +122,15 @@ async function runPool(items, concurrency, fn) {
 
 function printHelp() {
   console.log(`
-Usage: node index.js --csv <pairs.csv> [--out <dir>] [--threads N] [--max-iterations N]
+Usage: node index.js --csv <pairs.csv> [--out <dir>] [--threads N] [--max-iterations N] [--recipe <file>]
 
 CSV format (header optional):
   source,target
   https://example.com/original,https://example.com/migrated
+
+Optional per-site recipe (YAML) — see recipe.example.yaml and ROADMAP.md:
+  --recipe <file>          Load ignore/mask/normalize rules, capture profiles, interaction
+                             hints. Omitted => zero-config defaults (desktop profile only).
 
 Environment: copy .env.example to .env in this package directory.
   Only that folder is loaded — not parent repo .env files.
@@ -244,6 +252,25 @@ async function main() {
     process.exit(1);
   }
 
+  // Optional per-site recipe. No recipe => zero-config defaults (desktop only) =>
+  // behavior unchanged.
+  let recipe = DEFAULT_RECIPE;
+  if (args.recipe) {
+    if (!fs.existsSync(args.recipe)) {
+      console.error(`Recipe not found: ${args.recipe}`);
+      process.exit(1);
+    }
+    try {
+      const loaded = loadRecipe(args.recipe);
+      recipe = loaded.recipe;
+      for (const w of loaded.warnings) console.warn(`Recipe warning: ${w}`);
+      console.log(`Recipe: ${args.recipe} (profiles: ${recipe.profiles.join(', ')})`);
+    } catch (e) {
+      console.error(e.message);
+      process.exit(1);
+    }
+  }
+
   const outDir =
     args.outDir ||
     path.join(process.cwd(), `page-pair-diff-run-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}`);
@@ -259,6 +286,8 @@ async function main() {
     screeningOnly: args.screeningOnly,
     textOnly: args.textOnly,
     noScreening: args.noScreening,
+    recipePath: args.recipe || null,
+    profiles: recipe.profiles,
     cwd: process.cwd(),
   });
 
@@ -292,6 +321,7 @@ async function main() {
       skipScreening: args.noScreening,
       screeningOnly: args.screeningOnly,
       textOnly: args.textOnly,
+      profiles: recipe.profiles,
     });
     const line = JSON.stringify({
       slug: report.slug,

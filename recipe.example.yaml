@@ -1,0 +1,55 @@
+# Per-site recipe (optional). Pass with:  node index.js --csv pairs.csv --recipe recipe.yaml
+#
+# Everything here is optional; omitted sections fall back to zero-config defaults
+# (desktop profile, no ignores/masks/normalizers). See ROADMAP.md for the vision:
+# AI "scouts" will generate this file, and a human can tweak any value. Each field
+# may carry provenance so scouted values are transparent and human edits stick.
+
+site:
+  sourceOrigin: https://old.example.com
+  targetOrigin: https://main--site--org.aem.page
+
+# Which capture profiles to run the pipeline against (desktop | mobile | tablet).
+profiles: [desktop, mobile]
+
+# Excluded from ALL comparison (content + visual) — third-party chrome that isn't
+# part of the migration.
+ignore:
+  - selector: "#onetrust-banner-sdk"
+    reason: cookie-consent
+  - selector: ".live-chat-widget"
+    reason: third-party-widget
+
+# Excluded from VISUAL diff only (content still audited) — regions that legitimately
+# change on their own and would cause false visual diffs.
+mask:
+  - selector: ".carousel--autoplay"
+    reason: autoplay
+
+# Text normalization applied before content comparison.
+normalize:
+  - from: "Sign in"          # rewrite: source wording -> target wording
+    to: "Log in"
+  - ignorePattern: "\\d{1,2}:\\d{2}\\s?(am|pm)"   # drop volatile content (timestamps)
+    flags: "gi"
+
+# Click-everything (Phase 3) controls.
+interaction:
+  denylist:                  # never click these (destructive / navigational)
+    - ".add-to-cart"
+    - "button[type=submit]"
+  hints:                     # site-specific expansion hints
+    - selector: ".faq-accordion"
+      action: expand-all
+
+# Differences a human has reviewed and accepted (won't be reported).
+knownDiffs:
+  - source: "© 2023 Example Corp"
+    target: "© 2024 Example Corp"
+    accept: true
+
+# Provenance: who set each field. AI scouts write these; human edits flip `by` to
+# "human" and are never overwritten on re-scout.
+provenance:
+  "ignore[0]": { by: ai-scout, confidence: 0.95, reviewed: false }
+  "mask[0]": { by: ai-scout, confidence: 0.8, reviewed: false }
