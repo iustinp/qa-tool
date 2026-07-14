@@ -54,6 +54,7 @@ function layoutAuditSummaryFields(report) {
     layoutMatchedCount: l?.matchedCount ?? null,
     layoutMissingCount: l?.missingCount ?? null,
     layoutExtraCount: l?.extraCount ?? null,
+    layoutMovedCount: l?.movedCount ?? null,
     layoutCoverage: l?.coverage ?? null,
     layoutDivergenceSegments: l?.divergenceSegmentCount ?? null,
     layoutDriftCount: l?.layoutDriftCount ?? null,
@@ -716,6 +717,36 @@ async function main() {
     layoutMissingHeader + (layoutMissingBody ? `${layoutMissingBody}\n` : '')
   );
   console.log(`Wrote ${layoutMissingCsvPath} (${layoutRows.length} rows)`);
+
+  // Text-layout: moved/reordered content (same text, source y -> target y).
+  const movedRows = [];
+  for (const r of results) {
+    const la = r.layoutAudit;
+    if (!la || r.captureError) continue;
+    for (const m of la.moved || []) {
+      movedRows.push({
+        slug: r.slug,
+        sourceY: m.sourceY,
+        targetY: m.targetY,
+        text: m.text || '',
+        sourceUrl: r.sourceUrl,
+        targetUrl: r.targetUrl,
+      });
+    }
+  }
+  const layoutMovedCsvPath = path.join(outDir, 'layout-moved.csv');
+  const layoutMovedHeader = 'slug,sourceY,targetY,text,sourceUrl,targetUrl\n';
+  const layoutMovedBody = movedRows
+    .map(
+      (row) =>
+        `${csvEscape(row.slug)},${row.sourceY},${row.targetY},${csvEscape(row.text)},${csvEscape(row.sourceUrl)},${csvEscape(row.targetUrl)}`
+    )
+    .join('\n');
+  fs.writeFileSync(
+    layoutMovedCsvPath,
+    layoutMovedHeader + (layoutMovedBody ? `${layoutMovedBody}\n` : '')
+  );
+  console.log(`Wrote ${layoutMovedCsvPath} (${movedRows.length} rows)`);
 }
 
 main().catch((e) => {
