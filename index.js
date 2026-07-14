@@ -47,6 +47,19 @@ function textAuditSummaryFields(report) {
   };
 }
 
+function layoutAuditSummaryFields(report) {
+  const l = report.layoutAudit;
+  return {
+    layoutStatus: l?.status ?? null,
+    layoutMatchedCount: l?.matchedCount ?? null,
+    layoutMissingCount: l?.missingCount ?? null,
+    layoutExtraCount: l?.extraCount ?? null,
+    layoutCoverage: l?.coverage ?? null,
+    layoutDivergenceSegments: l?.divergenceSegmentCount ?? null,
+    layoutDriftCount: l?.layoutDriftCount ?? null,
+  };
+}
+
 function contentSummaryFields(report) {
   const c = report.contentComparison;
   const r = c?.rollup;
@@ -71,6 +84,7 @@ function parseArgs(argv) {
     textOnly: false,
     recipe: null,
     cache: null, // null => env default; true/false => explicit --cache/--no-cache
+    layoutAudit: null, // null => default on; false via --no-layout-audit
   };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
@@ -83,6 +97,8 @@ function parseArgs(argv) {
     else if (a === '--recipe') out.recipe = argv[++i];
     else if (a === '--cache') out.cache = true;
     else if (a === '--no-cache') out.cache = false;
+    else if (a === '--layout-audit') out.layoutAudit = true;
+    else if (a === '--no-layout-audit') out.layoutAudit = false;
     else if (a.startsWith('--csv=')) out.csv = a.slice(6);
     else if (a === '--csv') out.csv = argv[++i];
     else if (a.startsWith('--threads=')) out.threads = Math.max(1, parseInt(a.split('=')[1], 10) || 1);
@@ -151,6 +167,11 @@ Vision result cache (content-addressed by prompt + image bytes; reuses segment/m
 results for identical inputs across pages and re-runs):
   --cache / --no-cache     Enable/disable (default off; PPD_CACHE=1 also enables)
   PPD_CACHE_DIR            Cache location (default ./.ppd-cache)
+
+Text-layout audit (deterministic, AI-free): fingerprints each page's text geometry and
+aligns source vs target -> localized missing/extra copy + CSS-drift signal.
+  --layout-audit / --no-layout-audit   Enable/disable (default on; PPD_LAYOUT_AUDIT=0 disables)
+  Artifacts: pairs/<slug>/layout-audit.json, run-level layout-missing.csv
 
 Environment: copy .env.example to .env in this package directory.
   Only that folder is loaded — not parent repo .env files.
@@ -295,6 +316,13 @@ async function main() {
   const cacheEnabled = args.cache != null ? args.cache : isCacheEnabled();
   const cacheStore = createCacheStore({ namespace: 'vision', enabled: cacheEnabled });
 
+  // Deterministic text-layout audit (AI-free). Default on; disable with
+  // --no-layout-audit or PPD_LAYOUT_AUDIT=0.
+  const layoutAuditEnabled =
+    args.layoutAudit != null
+      ? args.layoutAudit
+      : !(process.env.PPD_LAYOUT_AUDIT === '0' || process.env.PPD_LAYOUT_AUDIT === 'false');
+
   const outDir =
     args.outDir ||
     path.join(process.cwd(), `page-pair-diff-run-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}`);
@@ -314,6 +342,7 @@ async function main() {
     profiles: recipe.profiles,
     cacheEnabled,
     cacheDir: cacheEnabled ? cacheStore.dir : null,
+    layoutAuditEnabled,
     cwd: process.cwd(),
   });
 
@@ -338,6 +367,7 @@ async function main() {
   if (args.textOnly) console.log('Mode: text-only (text comparison, no image screening / no AI)');
   if (args.noScreening) console.log('Mode: screening disabled (--no-screening)');
   if (cacheEnabled) console.log(`Vision cache: on (${cacheStore.dir})`);
+  if (layoutAuditEnabled) console.log('Layout audit: on (deterministic text-layout fingerprint, AI-free)');
 
   const results = await runPool(rows, args.threads, async (pair, index) => {
     console.log(`\n[${index + 1}/${rows.length}] ${pair.source} → ${pair.target}`);
@@ -350,6 +380,7 @@ async function main() {
       textOnly: args.textOnly,
       profiles: recipe.profiles,
       cacheStore,
+      layoutAudit: layoutAuditEnabled,
     });
     const line = JSON.stringify({
       slug: report.slug,
@@ -365,6 +396,7 @@ async function main() {
       ...screeningSummaryFields(report),
       ...textAuditSummaryFields(report),
       ...contentSummaryFields(report),
+      ...layoutAuditSummaryFields(report),
     });
     summaryStream.write(`${line}\n`);
     await runLogger.event(report.slug, 'pair_summary_line', {
@@ -441,6 +473,7 @@ async function main() {
           ...screeningSummaryFields(r),
           ...textAuditSummaryFields(r),
           ...contentSummaryFields(r),
+          ...layoutAuditSummaryFields(r),
         })),
       },
       null,
@@ -653,6 +686,36 @@ async function main() {
     screenProfileHeader + (screenProfileBody ? `${screenProfileBody}\n` : '')
   );
   console.log(`Wrote ${screenProfileCsvPath} (${screenProfileRows.length} rows)`);
+
+  // Text-layout audit: missing source copy localized by y (deterministic, AI-free).
+  const layoutRows = [];
+  for (const r of results) {
+    const la = r.layoutAudit;
+    if (!la || r.captureError) continue;
+    for (const m of la.missing || []) {
+      layoutRows.push({
+        slug: r.slug,
+        sourceY: m.y,
+        sourceX: m.x,
+        text: m.text || '',
+        sourceUrl: r.sourceUrl,
+        targetUrl: r.targetUrl,
+      });
+    }
+  }
+  const layoutMissingCsvPath = path.join(outDir, 'layout-missing.csv');
+  const layoutMissingHeader = 'slug,sourceY,sourceX,text,sourceUrl,targetUrl\n';
+  const layoutMissingBody = layoutRows
+    .map(
+      (row) =>
+        `${csvEscape(row.slug)},${row.sourceY},${row.sourceX},${csvEscape(row.text)},${csvEscape(row.sourceUrl)},${csvEscape(row.targetUrl)}`
+    )
+    .join('\n');
+  fs.writeFileSync(
+    layoutMissingCsvPath,
+    layoutMissingHeader + (layoutMissingBody ? `${layoutMissingBody}\n` : '')
+  );
+  console.log(`Wrote ${layoutMissingCsvPath} (${layoutRows.length} rows)`);
 }
 
 main().catch((e) => {
