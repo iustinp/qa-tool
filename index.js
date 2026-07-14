@@ -71,6 +71,7 @@ function parseArgs(argv) {
     textOnly: false,
     recipe: null,
     cache: null, // null => env default; true/false => explicit --cache/--no-cache
+    promptCache: null, // null => env default; true/false => --prompt-cache/--no-prompt-cache
   };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
@@ -83,6 +84,8 @@ function parseArgs(argv) {
     else if (a === '--recipe') out.recipe = argv[++i];
     else if (a === '--cache') out.cache = true;
     else if (a === '--no-cache') out.cache = false;
+    else if (a === '--prompt-cache') out.promptCache = true;
+    else if (a === '--no-prompt-cache') out.promptCache = false;
     else if (a.startsWith('--csv=')) out.csv = a.slice(6);
     else if (a === '--csv') out.csv = argv[++i];
     else if (a.startsWith('--threads=')) out.threads = Math.max(1, parseInt(a.split('=')[1], 10) || 1);
@@ -151,6 +154,10 @@ Vision result cache (content-addressed by prompt + image bytes; reuses segment/m
 results for identical inputs across pages and re-runs):
   --cache / --no-cache     Enable/disable (default off; PPD_CACHE=1 also enables)
   PPD_CACHE_DIR            Cache location (default ./.ppd-cache)
+
+Prompt caching (reuse the identical-per-pair target image across a pair's match calls,
+so target-image tokens aren't re-sent each call):
+  --prompt-cache / --no-prompt-cache   Enable/disable (default off; PPD_PROMPT_CACHE=1 also enables)
 
 Environment: copy .env.example to .env in this package directory.
   Only that folder is loaded — not parent repo .env files.
@@ -295,6 +302,13 @@ async function main() {
   const cacheEnabled = args.cache != null ? args.cache : isCacheEnabled();
   const cacheStore = createCacheStore({ namespace: 'vision', enabled: cacheEnabled });
 
+  // Prompt caching: reuse the (identical-per-pair) target image across a pair's
+  // match calls. Off unless --prompt-cache or PPD_PROMPT_CACHE=1 => parity.
+  const promptCacheEnabled =
+    args.promptCache != null
+      ? args.promptCache
+      : process.env.PPD_PROMPT_CACHE === '1' || process.env.PPD_PROMPT_CACHE === 'true';
+
   const outDir =
     args.outDir ||
     path.join(process.cwd(), `page-pair-diff-run-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}`);
@@ -314,6 +328,7 @@ async function main() {
     profiles: recipe.profiles,
     cacheEnabled,
     cacheDir: cacheEnabled ? cacheStore.dir : null,
+    promptCacheEnabled,
     cwd: process.cwd(),
   });
 
@@ -338,6 +353,7 @@ async function main() {
   if (args.textOnly) console.log('Mode: text-only (text comparison, no image screening / no AI)');
   if (args.noScreening) console.log('Mode: screening disabled (--no-screening)');
   if (cacheEnabled) console.log(`Vision cache: on (${cacheStore.dir})`);
+  if (promptCacheEnabled) console.log('Prompt cache: on (target image reused across match calls per pair)');
 
   const results = await runPool(rows, args.threads, async (pair, index) => {
     console.log(`\n[${index + 1}/${rows.length}] ${pair.source} → ${pair.target}`);
@@ -350,6 +366,7 @@ async function main() {
       textOnly: args.textOnly,
       profiles: recipe.profiles,
       cacheStore,
+      promptCache: promptCacheEnabled,
     });
     const line = JSON.stringify({
       slug: report.slug,
