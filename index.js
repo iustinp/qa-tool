@@ -71,6 +71,7 @@ function parseArgs(argv) {
     textOnly: false,
     recipe: null,
     cache: null, // null => env default; true/false => explicit --cache/--no-cache
+    remainderMatch: null, // null => env default; true/false => --remainder-match/--no-remainder-match
   };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
@@ -83,6 +84,8 @@ function parseArgs(argv) {
     else if (a === '--recipe') out.recipe = argv[++i];
     else if (a === '--cache') out.cache = true;
     else if (a === '--no-cache') out.cache = false;
+    else if (a === '--remainder-match') out.remainderMatch = true;
+    else if (a === '--no-remainder-match') out.remainderMatch = false;
     else if (a.startsWith('--csv=')) out.csv = a.slice(6);
     else if (a === '--csv') out.csv = argv[++i];
     else if (a.startsWith('--threads=')) out.threads = Math.max(1, parseInt(a.split('=')[1], 10) || 1);
@@ -151,6 +154,12 @@ Vision result cache (content-addressed by prompt + image bytes; reuses segment/m
 results for identical inputs across pages and re-runs):
   --cache / --no-cache     Enable/disable (default off; PPD_CACHE=1 also enables)
   PPD_CACHE_DIR            Cache location (default ./.ppd-cache)
+
+Remainder match (blank already-matched regions out of the target, enumerate candidate
+regions for each source band, and disambiguate with a second AI call when >1 — reduces
+re-matching/drift):
+  --remainder-match / --no-remainder-match   Enable/disable (default off; PPD_REMAINDER_MATCH=1 also enables)
+  PPD_REMAINDER_MATCH_MIN_CONFIDENCE         Accept floor in remainder mode (default 0.6)
 
 Environment: copy .env.example to .env in this package directory.
   Only that folder is loaded — not parent repo .env files.
@@ -295,6 +304,13 @@ async function main() {
   const cacheEnabled = args.cache != null ? args.cache : isCacheEnabled();
   const cacheStore = createCacheStore({ namespace: 'vision', enabled: cacheEnabled });
 
+  // Remainder match: blank matched regions from the target + multi-candidate
+  // disambiguation. Off unless --remainder-match or PPD_REMAINDER_MATCH=1 => parity.
+  const remainderMatchEnabled =
+    args.remainderMatch != null
+      ? args.remainderMatch
+      : process.env.PPD_REMAINDER_MATCH === '1' || process.env.PPD_REMAINDER_MATCH === 'true';
+
   const outDir =
     args.outDir ||
     path.join(process.cwd(), `page-pair-diff-run-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}`);
@@ -313,6 +329,7 @@ async function main() {
     recipePath: args.recipe || null,
     profiles: recipe.profiles,
     cacheEnabled,
+    remainderMatchEnabled,
     cacheDir: cacheEnabled ? cacheStore.dir : null,
     cwd: process.cwd(),
   });
@@ -338,6 +355,7 @@ async function main() {
   if (args.textOnly) console.log('Mode: text-only (text comparison, no image screening / no AI)');
   if (args.noScreening) console.log('Mode: screening disabled (--no-screening)');
   if (cacheEnabled) console.log(`Vision cache: on (${cacheStore.dir})`);
+  if (remainderMatchEnabled) console.log('Remainder match: on (blank matched target regions + multi-candidate disambiguation)');
 
   const results = await runPool(rows, args.threads, async (pair, index) => {
     console.log(`\n[${index + 1}/${rows.length}] ${pair.source} → ${pair.target}`);
@@ -350,6 +368,7 @@ async function main() {
       textOnly: args.textOnly,
       profiles: recipe.profiles,
       cacheStore,
+      remainderMatch: remainderMatchEnabled,
     });
     const line = JSON.stringify({
       slug: report.slug,
