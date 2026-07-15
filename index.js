@@ -86,6 +86,8 @@ function parseArgs(argv) {
     recipe: null,
     cache: null, // null => env default; true/false => explicit --cache/--no-cache
     layoutAudit: null, // null => default on; false via --no-layout-audit
+    layoutOcr: null, // null => env default (off); true via --layout-ocr
+    layoutCanonical: null, // null => default on; false via --no-layout-canonical
   };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
@@ -100,6 +102,10 @@ function parseArgs(argv) {
     else if (a === '--no-cache') out.cache = false;
     else if (a === '--layout-audit') out.layoutAudit = true;
     else if (a === '--no-layout-audit') out.layoutAudit = false;
+    else if (a === '--layout-ocr') out.layoutOcr = true;
+    else if (a === '--no-layout-ocr') out.layoutOcr = false;
+    else if (a === '--layout-canonical') out.layoutCanonical = true;
+    else if (a === '--no-layout-canonical') out.layoutCanonical = false;
     else if (a.startsWith('--csv=')) out.csv = a.slice(6);
     else if (a === '--csv') out.csv = argv[++i];
     else if (a.startsWith('--threads=')) out.threads = Math.max(1, parseInt(a.split('=')[1], 10) || 1);
@@ -172,7 +178,15 @@ results for identical inputs across pages and re-runs):
 Text-layout audit (deterministic, AI-free): fingerprints each page's text geometry and
 aligns source vs target -> localized missing/extra copy + CSS-drift signal.
   --layout-audit / --no-layout-audit   Enable/disable (default on; PPD_LAYOUT_AUDIT=0 disables)
-  Artifacts: pairs/<slug>/layout-audit.json, run-level layout-missing.csv
+  --layout-canonical / --no-layout-canonical
+                                       Default on: reduce each page to a positioned "pear"
+                                         (rendered text + image placeholders) and compare those —
+                                         DOM-structure-agnostic, correct for sticky/absolute
+                                         elements. --no-layout-canonical falls back to DOM geometry.
+  --layout-ocr / --no-layout-ocr       Use OCR of the screenshots for text geometry instead (needs
+                                         the tesseract binary). Overrides canonical.
+  Artifacts: pairs/<slug>/layout-audit.json, layout-review.html, source/target-clm.json,
+             run-level layout-missing.csv
 
 Environment: copy .env.example to .env in this package directory.
   Only that folder is loaded — not parent repo .env files.
@@ -323,6 +337,16 @@ async function main() {
     args.layoutAudit != null
       ? args.layoutAudit
       : !(process.env.PPD_LAYOUT_AUDIT === '0' || process.env.PPD_LAYOUT_AUDIT === 'false');
+  const layoutOcrEnabled =
+    args.layoutOcr != null
+      ? args.layoutOcr
+      : process.env.PPD_LAYOUT_OCR === '1' || process.env.PPD_LAYOUT_OCR === 'true';
+  // Canonical Layout Model comparison is the default layout audit; --layout-ocr
+  // or --no-layout-canonical falls back to the screenshot/DOM fingerprint path.
+  const layoutCanonicalEnabled =
+    args.layoutCanonical != null
+      ? args.layoutCanonical
+      : !(process.env.PPD_LAYOUT_CANONICAL === '0' || process.env.PPD_LAYOUT_CANONICAL === 'false');
 
   const outDir =
     args.outDir ||
@@ -368,7 +392,14 @@ async function main() {
   if (args.textOnly) console.log('Mode: text-only (text comparison, no image screening / no AI)');
   if (args.noScreening) console.log('Mode: screening disabled (--no-screening)');
   if (cacheEnabled) console.log(`Vision cache: on (${cacheStore.dir})`);
-  if (layoutAuditEnabled) console.log('Layout audit: on (deterministic text-layout fingerprint, AI-free)');
+  if (layoutAuditEnabled) {
+    const mode = layoutOcrEnabled
+      ? 'OCR text geometry'
+      : layoutCanonicalEnabled
+        ? 'canonical DOM pears'
+        : 'DOM text geometry';
+    console.log(`Layout audit: on (${mode}, AI-free)`);
+  }
 
   const results = await runPool(rows, args.threads, async (pair, index) => {
     console.log(`\n[${index + 1}/${rows.length}] ${pair.source} → ${pair.target}`);
@@ -382,6 +413,8 @@ async function main() {
       profiles: recipe.profiles,
       cacheStore,
       layoutAudit: layoutAuditEnabled,
+      layoutOcr: layoutOcrEnabled,
+      layoutCanonical: layoutCanonicalEnabled,
     });
     const line = JSON.stringify({
       slug: report.slug,
