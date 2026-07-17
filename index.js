@@ -88,6 +88,7 @@ function parseArgs(argv) {
     layoutAudit: null, // null => default on; false via --no-layout-audit
     layoutOcr: null, // null => env default (off); true via --layout-ocr
     layoutCanonical: null, // null => default on; false via --no-layout-canonical
+    crawl: false, // opt-in one-hop interaction crawl (--crawl)
   };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
@@ -106,6 +107,7 @@ function parseArgs(argv) {
     else if (a === '--no-layout-ocr') out.layoutOcr = false;
     else if (a === '--layout-canonical') out.layoutCanonical = true;
     else if (a === '--no-layout-canonical') out.layoutCanonical = false;
+    else if (a === '--crawl') out.crawl = true;
     else if (a.startsWith('--csv=')) out.csv = a.slice(6);
     else if (a === '--csv') out.csv = argv[++i];
     else if (a.startsWith('--threads=')) out.threads = Math.max(1, parseInt(a.split('=')[1], 10) || 1);
@@ -185,8 +187,11 @@ aligns source vs target -> localized missing/extra copy + CSS-drift signal.
                                          elements. --no-layout-canonical falls back to DOM geometry.
   --layout-ocr / --no-layout-ocr       Use OCR of the screenshots for text geometry instead (needs
                                          the tesseract binary). Overrides canonical.
+  --crawl                              Opt-in one-hop interaction crawl: click non-navigating triggers
+                                         (tabs/accordions/modals) on each side, reveal gated text, and
+                                         resolve it against the base audit (slower; extra page loads).
   Artifacts: pairs/<slug>/layout-audit.json, layout-review.html, source/target-clm.json,
-             run-level layout-missing.csv
+             crawl.json (with --crawl), run-level layout-missing.csv
 
 Environment: copy .env.example to .env in this package directory.
   Only that folder is loaded — not parent repo .env files.
@@ -415,6 +420,7 @@ async function main() {
       layoutAudit: layoutAuditEnabled,
       layoutOcr: layoutOcrEnabled,
       layoutCanonical: layoutCanonicalEnabled,
+      layoutCrawl: args.crawl,
     });
     const line = JSON.stringify({
       slug: report.slug,
