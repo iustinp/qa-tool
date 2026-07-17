@@ -6,7 +6,8 @@
 node_modules/
 
 # Run outputs
-test-run_*/
+test-run*/
+clm-out*/
 page-pair-diff-run-*/
 debug-*/
 
@@ -16,3 +17,6 @@ debug-*/
 # OS / IDE
 .DS_Store
 .cursor/
+
+# canonical-layout prototype scratch output
+clm-out*/
