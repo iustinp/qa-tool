@@ -648,6 +648,28 @@ async function main() {
   );
   console.log(`Wrote ${textMissingCsvPath} (${textMissingRows.length} rows)`);
 
+  // Hidden slider content (#63): off-screen carousel/slider items reclassified OUT
+  // of plain content-missing. kind=missing → on source, absent on target;
+  // kind=extra → on target, absent on source. Surfaced here so reclassified items
+  // are never silently dropped (the visual review shows them as ghosts too).
+  const hiddenRows = [];
+  for (const r of results) {
+    if (r.captureError || !r.hiddenContent) continue;
+    for (const m of r.hiddenContent.missing || []) {
+      hiddenRows.push({ slug: r.slug, kind: 'missing', text: m.text || '', sourceUrl: r.sourceUrl, targetUrl: r.targetUrl });
+    }
+    for (const e of r.hiddenContent.extra || []) {
+      hiddenRows.push({ slug: r.slug, kind: 'extra', text: e.text || '', sourceUrl: r.sourceUrl, targetUrl: r.targetUrl });
+    }
+  }
+  const hiddenCsvPath = path.join(outDir, 'hidden-content.csv');
+  const hiddenHeader = 'slug,kind,text,sourceUrl,targetUrl\n';
+  const hiddenBody = hiddenRows
+    .map((row) => `${csvEscape(row.slug)},${csvEscape(row.kind)},${csvEscape(row.text)},${csvEscape(row.sourceUrl)},${csvEscape(row.targetUrl)}`)
+    .join('\n');
+  fs.writeFileSync(hiddenCsvPath, hiddenHeader + (hiddenBody ? `${hiddenBody}\n` : ''));
+  console.log(`Wrote ${hiddenCsvPath} (${hiddenRows.length} rows)`);
+
   // Content rollup: missing source copy split into missing-entirely (dropped
   // from the target under every profile) vs viewport-shifted (present under a
   // different profile). This is the reviewer-facing per-profile content result.
