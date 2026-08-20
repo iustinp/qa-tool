@@ -43,27 +43,33 @@ function writeScoreReport(outDir, rows, meta) {
   h1{margin:0 0 3px;font-size:16px} .sub{color:#777;font-size:12px}
   table{border-collapse:collapse;width:100%;background:#fff}
   th,td{padding:7px 10px;text-align:right;border-bottom:1px solid #eee;white-space:nowrap}
-  th{position:sticky;top:0;background:#fafafa;cursor:pointer;user-select:none;border-bottom:2px solid #ddd}
-  th:hover{background:#eee} th.page,td.page{text-align:left;white-space:normal;max-width:560px}
+  thead th{position:sticky;top:0;z-index:3;background:#fafafa;cursor:pointer;user-select:none;border-bottom:2px solid #ccc;vertical-align:bottom}
+  th:hover{filter:brightness(0.96)} th.page,td.page{text-align:left;white-space:normal;max-width:560px}
   td.page a{color:#0645ad;text-decoration:none} td.page a:hover{text-decoration:underline}
   td.page .rev{color:#9b30ff;font-size:11px;margin-left:8px}
   .bad{background:#fde2e2;color:#a00;font-weight:600}.mid{background:#fdf3d8;color:#8a6d00}.good{background:#e3f6e3;color:#181}
   .muted{color:#aaa}.arrow{font-size:10px;color:#888;margin-left:3px}
-  tr:hover td{background:#f2f7ff}
+  /* Column groups: content family (blue), drift family (purple); General Health bold. */
+  th.hp,td.hp{font-weight:700}
+  th.gc{background:#e6eefc}td.gc{background:#f4f8ff}
+  th.gd{background:#efe7fb}td.gd{background:#f8f4ff}
+  .gstart{border-left:2px solid #b9bccc}
+  td.sg{color:#158a15}td.sy{color:#8a6d00}td.sr{color:#c0392b;font-weight:600}
+  tr:hover td{filter:brightness(0.97)}
 </style></head><body>
 <header><h1>QA scores — ${esc(meta.pairCount)} pages</h1>
 <div class="sub">${esc(meta.generatedAt)} · click a column to sort (default: worst General Health first). Health &amp; Content higher = better; Drift lower = better.</div></header>
 <table id="t"><thead><tr>
   <th class="page" data-k="src" data-t="s">Page</th>
-  <th data-k="health" title="General Health, higher=better">Health %</th>
-  <th data-k="content" title="Content Completeness, higher=better">Content %</th>
-  <th data-k="drift" title="Drifting Items, lower=better">Drift %</th>
-  <th data-k="matched" title="matched text elements">✓</th>
-  <th data-k="missing" title="missing on target">miss</th>
-  <th data-k="extra" title="extra on target">extra</th>
-  <th data-k="g" title="drift green (≤20px)">🟢</th>
-  <th data-k="y" title="drift yellow (≤40px)">🟡</th>
-  <th data-k="rd" title="drift red (>40px)">🔴</th>
+  <th class="hp" data-k="health" title="overall page health — higher is better">General Health %</th>
+  <th class="gc gstart" data-k="content" title="content completeness — higher is better">Content Completeness %</th>
+  <th class="gc" data-k="matched" title="matched text elements">Matched</th>
+  <th class="gc" data-k="missing" title="missing on target">Missing</th>
+  <th class="gc" data-k="extra" title="extra on target">Extra</th>
+  <th class="gd gstart" data-k="drift" title="drifting items — lower is better">Drifting Items %</th>
+  <th class="gd" data-k="g" title="small drift (≤20px)">Small Drift</th>
+  <th class="gd" data-k="y" title="medium drift (≤40px)">Medium Drift</th>
+  <th class="gd" data-k="rd" title="large drift (>40px)">Large Drift</th>
 </tr></thead><tbody></tbody></table>
 <script>
 var ROWS=${json};
@@ -80,11 +86,11 @@ function render(){
   rows.forEach(function(r){ var tr=document.createElement('tr');
     var rev=r.slug?' <a class="rev" href="pairs/'+r.slug+'/layout-review.html">review ↗</a>':'';
     tr.innerHTML='<td class="page"><a href="'+r.tgt+'" target="_blank" rel="noopener">'+shorten(r.src||r.tgt)+'</a>'+rev+(r.err?' <span class="muted">('+r.err+')</span>':'')
-      +'</td><td class="'+cls(r.health,'hi')+'">'+cell(r.health)+'</td>'
-      +'<td class="'+cls(r.content,'hi')+'">'+cell(r.content)+'</td>'
-      +'<td class="'+cls(r.drift,'lo')+'">'+cell(r.drift)+'</td>'
-      +'<td>'+cell(r.matched)+'</td><td>'+cell(r.missing)+'</td><td>'+cell(r.extra)+'</td>'
-      +'<td>'+cell(r.g)+'</td><td>'+cell(r.y)+'</td><td>'+cell(r.rd)+'</td>';
+      +'</td><td class="hp '+cls(r.health,'hi')+'">'+cell(r.health)+'</td>'
+      +'<td class="gstart '+cls(r.content,'hi')+'">'+cell(r.content)+'</td>'
+      +'<td class="gc">'+cell(r.matched)+'</td><td class="gc">'+cell(r.missing)+'</td><td class="gc">'+cell(r.extra)+'</td>'
+      +'<td class="gstart '+cls(r.drift,'lo')+'">'+cell(r.drift)+'</td>'
+      +'<td class="gd sg">'+cell(r.g)+'</td><td class="gd sy">'+cell(r.y)+'</td><td class="gd sr">'+cell(r.rd)+'</td>';
     tb.appendChild(tr); });
   document.querySelectorAll('#t th').forEach(function(th){ var base=th.getAttribute('data-base')||th.textContent.replace(/\\s*[▲▼]$/,'').trim(); th.setAttribute('data-base',base);
     th.innerHTML=base+(th.getAttribute('data-k')===sortK?' <span class="arrow">'+(sortDir>0?'▲':'▼')+'</span>':''); });
