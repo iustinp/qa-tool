@@ -47,6 +47,7 @@ function writeScoreReport(outDir, rows, meta) {
   th:hover{filter:brightness(0.96)} th.page,td.page{text-align:left;white-space:normal;max-width:560px}
   td.page a{color:#0645ad;text-decoration:none} td.page a:hover{text-decoration:underline}
   td.page .rev{color:#9b30ff;font-size:11px;margin-left:8px}
+  th.urls,td.urls{text-align:left;white-space:nowrap} td.urls a{color:#0645ad;text-decoration:none} td.urls a:hover{text-decoration:underline} td.urls .sep{color:#bbb;margin:0 5px}
   .bad{background:#fde2e2;color:#a00;font-weight:600}.mid{background:#fdf3d8;color:#8a6d00}.good{background:#e3f6e3;color:#181}
   .muted{color:#aaa}.arrow{font-size:10px;color:#888;margin-left:3px}
   /* Column groups: content family (blue), drift family (purple); General Health bold. */
@@ -58,8 +59,9 @@ function writeScoreReport(outDir, rows, meta) {
   tr:hover td{filter:brightness(0.97)}
 </style></head><body>
 <header><h1>QA scores — ${esc(meta.pairCount)} pages</h1>
-<div class="sub">${esc(meta.generatedAt)} · click a column to sort (default: worst General Health first). Health &amp; Content higher = better; Drift lower = better.</div></header>
+<div class="sub">${esc(meta.generatedAt)} · click a column to sort (default: worst General Health first). Health &amp; Content higher = better; Drift lower = better. ⌘/Ctrl-click (or middle-click) a URL to open it in a background tab.</div></header>
 <table id="t"><thead><tr>
+  <th class="urls" title="open the source / target page (⌘/Ctrl-click or middle-click to open in a background tab)">Pair URLs</th>
   <th class="page" data-k="src" data-t="s">Page</th>
   <th class="hp" data-k="health" title="overall page health — higher is better">General Health %</th>
   <th class="gc gstart" data-k="content" title="content completeness — higher is better">Content Completeness %</th>
@@ -85,8 +87,9 @@ function render(){
   var tb=document.querySelector('#t tbody'); tb.innerHTML='';
   rows.forEach(function(r){ var tr=document.createElement('tr');
     var rev=r.slug?' <a class="rev" href="pairs/'+r.slug+'/layout-review.html">review ↗</a>':'';
-    tr.innerHTML='<td class="page"><a href="'+r.tgt+'" target="_blank" rel="noopener">'+shorten(r.src||r.tgt)+'</a>'+rev+(r.err?' <span class="muted">('+r.err+')</span>':'')
-      +'</td><td class="hp '+cls(r.health,'hi')+'">'+cell(r.health)+'</td>'
+    tr.innerHTML='<td class="urls"><a class="pl" href="'+r.src+'" target="_blank" rel="noopener">Source</a><span class="sep">·</span><a class="pl" href="'+r.tgt+'" target="_blank" rel="noopener">Target</a></td>'
+      +'<td class="page">'+shorten(r.src||r.tgt)+rev+(r.err?' <span class="muted">('+r.err+')</span>':'')+'</td>'
+      +'<td class="hp '+cls(r.health,'hi')+'">'+cell(r.health)+'</td>'
       +'<td class="gstart '+cls(r.content,'hi')+'">'+cell(r.content)+'</td>'
       +'<td class="gc">'+cell(r.matched)+'</td><td class="gc">'+cell(r.missing)+'</td><td class="gc">'+cell(r.extra)+'</td>'
       +'<td class="gstart '+cls(r.drift,'lo')+'">'+cell(r.drift)+'</td>'
@@ -95,7 +98,7 @@ function render(){
   document.querySelectorAll('#t th').forEach(function(th){ var base=th.getAttribute('data-base')||th.textContent.replace(/\\s*[▲▼]$/,'').trim(); th.setAttribute('data-base',base);
     th.innerHTML=base+(th.getAttribute('data-k')===sortK?' <span class="arrow">'+(sortDir>0?'▲':'▼')+'</span>':''); });
 }
-document.querySelectorAll('#t th').forEach(function(th){ th.onclick=function(){ var k=th.getAttribute('data-k'); if(k===sortK)sortDir=-sortDir; else{sortK=k;sortDir=1;} render(); }; });
+document.querySelectorAll('#t th').forEach(function(th){ th.onclick=function(){ var k=th.getAttribute('data-k'); if(!k)return; if(k===sortK)sortDir=-sortDir; else{sortK=k;sortDir=1;} render(); }; });
 render();
 </script></body></html>`;
   const p = path.join(outDir, 'report.html');
