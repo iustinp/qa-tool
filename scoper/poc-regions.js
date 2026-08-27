@@ -42,14 +42,23 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 const COLOR = { chrome: '#8a94a6', block: '#1a9e6a', prose: '#3b76d1' };
 
 function renderPage(pg, scale) {
-  const pageW = Math.max(...pg.nodes.map((n) => n.x + n.w), 100);
-  const pageH = Math.max(...pg.nodes.map((n) => n.y + n.h), 100);
+  const nodeMaxX = Math.max(...pg.nodes.map((n) => n.x + n.w), 100);
+  const nodeMaxY = Math.max(...pg.nodes.map((n) => n.y + n.h), 100);
+  // The screenshot spans the DOCUMENT CSS size (clm.width x clm.height); node coords live in that
+  // same CSS space (some may overflow it horizontally, e.g. off-screen carousel slides). Register
+  // the backdrop against clm dims — sizing the img explicitly to clm.width/height*S makes it match
+  // the boxes regardless of the screenshot's intrinsic pixel size / DPR. The page box grows to fit
+  // any overflow nodes so they're still visible beyond the screenshot edge.
+  const docW = pg.width || nodeMaxX;
+  const docH = pg.height || nodeMaxY;
+  const pageW = Math.max(docW, nodeMaxX);
+  const pageH = Math.max(docH, nodeMaxY);
   const S = scale;
   const shot = pg.dir && path.join(pg.dir, 'screenshots', 'source-full.png');
   const bg = shot && fs.existsSync(shot) ? `data:image/png;base64,${fs.readFileSync(shot).toString('base64')}` : null;
 
   const parts = [`<div class="page" style="width:${(pageW * S).toFixed(0)}px;height:${(pageH * S).toFixed(0)}px">`];
-  if (bg) parts.push(`<img class="bg" src="${bg}" style="width:${(pageW * S).toFixed(0)}px">`);
+  if (bg) parts.push(`<img class="bg" src="${bg}" style="width:${(docW * S).toFixed(0)}px;height:${(docH * S).toFixed(0)}px">`);
   else {
     // fallback: render pear text/images faintly so there's still a backdrop
     for (const n of pg.nodes) {
@@ -72,7 +81,8 @@ function renderPage(pg, scale) {
 
 const hasShot = (pg) => pg.dir && fs.existsSync(path.join(pg.dir, 'screenshots', 'source-full.png'));
 const sample = [...perPage].sort((a, b) => (hasShot(b) ? 1 : 0) - (hasShot(a) ? 1 : 0)).slice(0, nSamples);
-const scale = 900 / Math.max(...sample[0].nodes.map((n) => n.x + n.w), 900);
+const s0W = sample[0].width || Math.max(...sample[0].nodes.map((n) => n.x + n.w), 900);
+const scale = 900 / s0W;
 const body = sample.map((pg) => renderPage(pg, scale)).join('<hr>');
 const html = `<!doctype html><meta charset="utf8"><title>scoper regions</title>
 <style>
