@@ -37,13 +37,15 @@ async function scanOne(url, i) {
     // collectCanonicalLayout gates the pear extraction (off by default). dismissOverlays:false
     // skips the AI-based overlay dismissal (needs an API key we don't have for a pure scan); the
     // selector-based modal removal still runs.
-    const { metadata } = await captureFullPageBuffer(url, { captureRole: 'page', collectCanonicalLayout: true, dismissOverlays: false });
+    const { metadata, buffer } = await captureFullPageBuffer(url, { captureRole: 'page', collectCanonicalLayout: true, dismissOverlays: false });
     const clm = metadata && metadata.canonicalLayout;
     if (!clm || !Array.isArray(clm.nodes) || !clm.nodes.length) throw new Error('no canonical layout');
     if (!clm.url) clm.url = url;
     const dir = path.join(pairsDir, slug(url, i));
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'source-clm.json'), JSON.stringify(clm));
+    // full-page screenshot (pixel coords == document coords) as a review backdrop
+    if (buffer) { fs.mkdirSync(path.join(dir, 'screenshots'), { recursive: true }); fs.writeFileSync(path.join(dir, 'screenshots', 'source-full.png'), buffer); }
     ok++; console.log(`${tag} ok   ${clm.nodes.length} nodes  ${url}`);
   } catch (e) {
     failed++; console.log(`${tag} FAIL ${e.message}  ${url}`);
