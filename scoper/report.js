@@ -7,6 +7,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const sharp = require('sharp'); // already a project dep; used exactly like lib/image-hash.js
 const { classifyDescriptors } = require('./chrome');
 const { assembleRegions } = require('./regions');
 const { canonical, guessType, buildCatalog } = require('./catalog');
@@ -81,6 +82,35 @@ function regionsHtml(perPage, { nSamples = 8, title = 'scoper regions' } = {}) {
 ${body}`;
 }
 
+// ---- real screenshot crop of an example instance --------------------------
+// node/region coords map to screenshot pixels by DPR (see lib/image-hash.js, which uses them
+// 1:1 at dpr=1). Crop the example region's bbox from its page screenshot -> small PNG data URI.
+async function cropExample(block) {
+  const ex = block.example, pg = ex && ex.pg;
+  if (!pg || !pg.dir) return null;
+  const shot = path.join(pg.dir, 'screenshots', 'source-full.png');
+  if (!fs.existsSync(shot)) return null;
+  try {
+    const dpr = pg.dpr || 1;
+    const r = ex.region;
+    const meta = await sharp(shot).metadata();
+    let left = Math.max(0, Math.round(r.x * dpr));
+    let top = Math.max(0, Math.round(r.y * dpr));
+    if (left >= meta.width || top >= meta.height) return null; // off-screen (e.g. overflow slide)
+    const width = Math.max(1, Math.min(Math.round(r.w * dpr), meta.width - left));
+    const height = Math.max(1, Math.min(Math.round(r.h * dpr), meta.height - top));
+    const buf = await sharp(shot).extract({ left, top, width, height })
+      .resize({ width: Math.min(width, 360), withoutEnlargement: true }).png().toBuffer();
+    return `data:image/png;base64,${buf.toString('base64')}`;
+  } catch { return null; }
+}
+
+// mutate: attach block.crop (real screenshot) to each catalog block that has a screenshot
+async function attachCrops(catalog) {
+  for (const b of catalog) { if (b.pageCount >= 2) b.crop = await cropExample(b); }
+  return catalog;
+}
+
 // ---- catalog / scoping report ---------------------------------------------
 function thumb(example, maxW = 340) {
   const rn = example.region.nodes;
@@ -104,7 +134,7 @@ function catalogHtml(catalog, { pages } = {}) {
     <div class="hd"><span class="rk">#${i + 1}</span><span class="ty">${esc(b.type)}</span>${b.isCollection ? '<span class="cl">collection</span>' : ''}</div>
     <div class="st">${b.pageCount} pages · ${b.instances} instances${b.maxRepeat > 1 ? ` · up to ${b.maxRepeat}× repeat` : ''}</div>
     <div class="sig">${esc(b.key)}</div>
-    ${thumb(b.example)}
+    ${b.crop ? `<img class="shot" src="${b.crop}" alt="example">` : thumb(b.example)}
     <div class="sm">${b.samples.slice(0, 4).map((s) => esc(s)).join(' · ')}</div>
   </div>`).join('');
   return `<!doctype html><meta charset="utf8"><title>scoper — block catalog</title>
@@ -118,6 +148,7 @@ function catalogHtml(catalog, { pages } = {}) {
  .cl{background:#1a9e6a;color:#fff;font-size:10px;padding:1px 7px;border-radius:10px}
  .st{color:#555;font-size:12px;margin-bottom:4px}
  .sig{font-family:ui-monospace,monospace;font-size:11px;color:#1a9e6a;background:#f2faf6;border:1px solid #d6efe3;border-radius:4px;padding:3px 6px;margin-bottom:10px;word-break:break-all}
+ .shot{display:block;max-width:100%;border:1px solid #ddd;border-radius:4px;margin:0 auto 8px}
  .th{position:relative;border:1px solid #eee;background:#fff;margin:0 auto 8px}
  .th .tx{position:absolute;color:#333;overflow:hidden;white-space:nowrap;line-height:1}
  .th .im{position:absolute;background:#f0ede6;border:1px dashed #b7ad97;color:#b7ad97;font-size:8px;text-align:center;box-sizing:border-box}
@@ -128,4 +159,4 @@ function catalogHtml(catalog, { pages } = {}) {
 <div class="grid">${cards}</div>`;
 }
 
-module.exports = { scope, regionsHtml, catalogHtml };
+module.exports = { scope, regionsHtml, catalogHtml, attachCrops };

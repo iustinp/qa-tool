@@ -98,7 +98,7 @@ function buildCatalog(perPage) {
   const items = [];
   for (const pg of perPage) for (const r of pg.regions) if (r.type === 'block') {
     const c = canonical(r);
-    items.push({ r, url: pg.url, c, vec: new Map(c.unit), size: c.unitSize });
+    items.push({ r, pg, url: pg.url, c, vec: new Map(c.unit), size: c.unitSize });
   }
   items.sort((a, b) => b.size - a.size || (a.c.key < b.c.key ? -1 : 1));
 
@@ -109,9 +109,9 @@ function buildCatalog(perPage) {
       const ratio = Math.min(it.size, cl.repSize) / Math.max(it.size, cl.repSize);
       if (ratio >= SIZE_RATIO && cosine(it.vec, cl.repVec) >= SIM) { hit = cl; break; }
     }
-    if (!hit) { hit = { repVec: it.vec, repSize: it.size, rep: it.c, example: { region: it.r, url: it.url }, pages: new Set(), instances: 0, maxRepeat: 1, samples: new Set() }; clusters.push(hit); }
+    if (!hit) { hit = { repVec: it.vec, repSize: it.size, rep: it.c, example: { region: it.r, url: it.url, pg: it.pg }, pages: new Set(), instances: 0, maxRepeat: 1, samples: new Set() }; clusters.push(hit); }
     hit.pages.add(it.url); hit.instances++; hit.maxRepeat = Math.max(hit.maxRepeat, it.c.repeat);
-    if (it.r.count > hit.example.region.count) hit.example = { region: it.r, url: it.url };
+    if (it.r.count > hit.example.region.count) hit.example = { region: it.r, url: it.url, pg: it.pg };
     for (const n of it.r.nodes) if (n.kind === 'text' && n.text && hit.samples.size < 6) hit.samples.add(n.text.slice(0, 46));
   }
 

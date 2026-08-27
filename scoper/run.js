@@ -13,7 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 const { loadPears } = require('./signature');
-const { scope, regionsHtml, catalogHtml } = require('./report');
+const { scope, regionsHtml, catalogHtml, attachCrops } = require('./report');
 
 const pearsDir = process.argv[2];
 if (!pearsDir) { console.error('usage: node scoper/run.js <pearsDir> [label] [nSamples]'); process.exit(1); }
@@ -27,6 +27,10 @@ const { perPage, catalog } = scope(pears);
 const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
 const outDir = path.join(process.cwd(), `scoper-run_${label}_${ts}`);
 fs.mkdirSync(outDir, { recursive: true });
+
+main().catch((e) => { console.error(e); process.exit(1); });
+async function main() {
+await attachCrops(catalog); // real screenshot crop per catalog block
 
 fs.writeFileSync(path.join(outDir, 'catalog.html'), catalogHtml(catalog, { pages: pears.length }));
 fs.writeFileSync(path.join(outDir, 'regions.html'), regionsHtml(perPage, { nSamples, title: `${label} regions` }));
@@ -49,3 +53,4 @@ table{border-collapse:collapse;margin-top:10px;font-size:13px} td,th{border:1px 
 console.log(`\nscoper run -> ${outDir}`);
 console.log(`  open: ${path.join(outDir, 'index.html')}`);
 console.log(`  ${pears.length} pages, ${catalog.filter((b) => b.pageCount >= 2).length} recurring block types\n`);
+}
