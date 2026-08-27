@@ -123,8 +123,12 @@ function assembleRegions(nodes, keyBucket) {
     return 'block';                             // genuinely mixed single instance
   };
 
-  // second pass — merge neighbouring BLOCK components into one region: a card row (thumbnail +
-  // text + its siblings) becomes a single "Cards" block; the repeating unit inside is Strategy A.
+  // second pass — merge neighbouring BLOCK components into one region: a card's thumbnail + text
+  // and the sibling cards of a ROW become a single block. This is HORIZONTAL adjacency only:
+  // two components merge when their vertical ranges OVERLAP (same row) and their horizontal gap
+  // is small. Requiring y-overlap makes a runaway VERTICAL chain down a dense page impossible
+  // (that was the EDC failure — leaked nav chained the whole 5047px page into one blob); a
+  // vertically-stacked list stays as separate per-item regions, which step A groups cross-page.
   const MERGE = Math.max(80, gapThresh * 2.5);
   const gi = groups.map((idxs) => ({ idxs, box: bbox(idxs), type: labelType(idxs) }));
   const ruf = makeUF(gi.length);
@@ -132,9 +136,9 @@ function assembleRegions(nodes, keyBucket) {
     for (let b = a + 1; b < gi.length; b++) {
       if (gi[a].type !== 'block' || gi[b].type !== 'block') continue;
       const A = gi[a].box, B = gi[b].box;
+      const vOverlap = Math.min(A.y2, B.y2) - Math.max(A.y, B.y);  // >0 => share a horizontal band
       const hx = Math.max(0, Math.max(A.x, B.x) - Math.min(A.x2, B.x2));
-      const hy = Math.max(0, Math.max(A.y, B.y) - Math.min(A.y2, B.y2));
-      if (Math.hypot(hx, hy) < MERGE) ruf.union(a, b);
+      if (vOverlap > 0 && hx < MERGE) ruf.union(a, b);
     }
   }
   const merged = new Map();
