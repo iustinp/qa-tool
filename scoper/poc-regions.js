@@ -31,7 +31,7 @@ let totalRegions = 0;
 const perPage = [];
 for (const p of pears) {
   const regions = assembleRegions(p.nodes, keyBucket);
-  perPage.push({ url: p.url, dir: p.dir, nodes: p.nodes, regions });
+  perPage.push({ url: p.url, dir: p.dir, nodes: p.nodes, width: p.width, height: p.height, dpr: p.dpr, regions });
   for (const r of regions) { tally[r.type]++; totalRegions++; }
 }
 console.log(`\n=== corpus: ${pears.length} pages, ${totalRegions} regions (${(totalRegions / pears.length).toFixed(1)}/page) ===`);
