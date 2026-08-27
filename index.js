@@ -17,6 +17,7 @@ const { initializeClaudeClient, probeBedrockAuth } = require('./lib/claude');
 const { processPair } = require('./lib/pair-worker');
 const { loadRecipe, DEFAULT_RECIPE } = require('./lib/recipe');
 const { createCacheStore, isCacheEnabled } = require('./lib/cache-store');
+const { writeScoreReport } = require('./lib/score-report');
 
 function screeningSummaryFields(report) {
   const s = report.screening;
@@ -58,6 +59,13 @@ function layoutAuditSummaryFields(report) {
     layoutCoverage: l?.coverage ?? null,
     layoutDivergenceSegments: l?.divergenceSegmentCount ?? null,
     layoutDriftCount: l?.layoutDriftCount ?? null,
+    // Health scores (healthScore/contentScore higher=better; driftScore higher=worse).
+    healthScore: l?.healthScore ?? null,
+    contentScore: l?.contentScore ?? null,
+    driftScore: l?.driftScore ?? null,
+    driftGreen: l?.driftGreen ?? null,
+    driftYellow: l?.driftYellow ?? null,
+    driftRed: l?.driftRed ?? null,
   };
 }
 
@@ -523,6 +531,21 @@ async function main() {
 
   console.log(`\nWrote ${summaryJson}`);
 
+  // Sortable HTML report of every pair + its health scores/components.
+  const reportRows = results.map((r) => ({
+    slug: r.slug,
+    sourceUrl: r.sourceUrl,
+    targetUrl: r.targetUrl,
+    captureError: r.captureError,
+    finishedReason: r.finishedReason,
+    ...layoutAuditSummaryFields(r),
+  }));
+  const reportPath = writeScoreReport(outDir, reportRows, {
+    pairCount: results.length,
+    generatedAt: new Date().toISOString(),
+  });
+  console.log(`Wrote ${reportPath}`);
+
   const screeningCsvPath = path.join(outDir, 'screening-summary.csv');
   const screeningHeader =
     'slug,verdict,skipAi,imageSimilarity,textRecall,heightRatio,sourceUrl,targetUrl\n';
@@ -647,6 +670,28 @@ async function main() {
     textMissingHeader + (textMissingBody ? `${textMissingBody}\n` : '')
   );
   console.log(`Wrote ${textMissingCsvPath} (${textMissingRows.length} rows)`);
+
+  // Hidden slider content (#63): off-screen carousel/slider items reclassified OUT
+  // of plain content-missing. kind=missing → on source, absent on target;
+  // kind=extra → on target, absent on source. Surfaced here so reclassified items
+  // are never silently dropped (the visual review shows them as ghosts too).
+  const hiddenRows = [];
+  for (const r of results) {
+    if (r.captureError || !r.hiddenContent) continue;
+    for (const m of r.hiddenContent.missing || []) {
+      hiddenRows.push({ slug: r.slug, kind: 'missing', text: m.text || '', sourceUrl: r.sourceUrl, targetUrl: r.targetUrl });
+    }
+    for (const e of r.hiddenContent.extra || []) {
+      hiddenRows.push({ slug: r.slug, kind: 'extra', text: e.text || '', sourceUrl: r.sourceUrl, targetUrl: r.targetUrl });
+    }
+  }
+  const hiddenCsvPath = path.join(outDir, 'hidden-content.csv');
+  const hiddenHeader = 'slug,kind,text,sourceUrl,targetUrl\n';
+  const hiddenBody = hiddenRows
+    .map((row) => `${csvEscape(row.slug)},${csvEscape(row.kind)},${csvEscape(row.text)},${csvEscape(row.sourceUrl)},${csvEscape(row.targetUrl)}`)
+    .join('\n');
+  fs.writeFileSync(hiddenCsvPath, hiddenHeader + (hiddenBody ? `${hiddenBody}\n` : ''));
+  console.log(`Wrote ${hiddenCsvPath} (${hiddenRows.length} rows)`);
 
   // Content rollup: missing source copy split into missing-entirely (dropped
   // from the target under every profile) vs viewport-shifted (present under a
