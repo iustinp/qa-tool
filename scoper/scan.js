@@ -34,7 +34,10 @@ let done = 0, ok = 0, failed = 0;
 async function scanOne(url, i) {
   const tag = `[${++done}/${urls.length}]`;
   try {
-    const { metadata } = await captureFullPageBuffer(url, { captureRole: 'page' });
+    // collectCanonicalLayout gates the pear extraction (off by default). dismissOverlays:false
+    // skips the AI-based overlay dismissal (needs an API key we don't have for a pure scan); the
+    // selector-based modal removal still runs.
+    const { metadata } = await captureFullPageBuffer(url, { captureRole: 'page', collectCanonicalLayout: true, dismissOverlays: false });
     const clm = metadata && metadata.canonicalLayout;
     if (!clm || !Array.isArray(clm.nodes) || !clm.nodes.length) throw new Error('no canonical layout');
     if (!clm.url) clm.url = url;
