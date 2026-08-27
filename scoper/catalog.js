@@ -32,19 +32,30 @@ function canonical(region) {
   return { key, unit, repeat: g, unitSize };
 }
 
-// algorithmic EDS block-type guess from the canonical unit (heuristic, first pass)
-function guessType(unit, isCollection) {
+// Algorithmic EDS block-type guess from the canonical unit + example geometry (heuristic).
+// FUTURE (issue #65): this structure->type mapping is CROSS-site knowledge (unlike per-site
+// discovery), so it is the natural place to plug a learned store of validated
+// (feature-vector -> EDS type) examples, with these rules as the fallback. Keep the decision a
+// pure function of content-blind structural features so a learned model can slot in here.
+function guessType(unit, isCollection, example) {
   const toks = unit.map(([t]) => t);
   const hasImg = toks.some((t) => t.startsWith('IMG'));
-  const tSizes = toks.filter((t) => t[0] === 'T').map((t) => parseInt(t.slice(1), 10) || 0);
-  const tiers = new Set(tSizes).size;
+  const sizes = toks.filter((t) => t[0] === 'T').map((t) => parseInt(t.slice(1), 10) || 0);
   const size = unit.reduce((s, [, c]) => s + c, 0);
-  if (hasImg && isCollection) return 'Cards / Teasers';
-  if (hasImg && !isCollection && size <= 3) return 'Hero / Media + text';
-  if (!hasImg && isCollection && tiers <= 1) return 'List / Columns';
-  if (!hasImg && tiers >= 2) return 'Heading + text';
-  if (hasImg) return 'Media';
-  return 'Block';
+  const maxS = sizes.length ? Math.max(...sizes) : 0;
+  const minS = sizes.length ? Math.min(...sizes) : 0;
+  const reg = example && example.region;
+  const wide = reg ? reg.w > reg.h * 1.2 : false;
+  // a dominant single heading: the largest tier is big, clearly larger than the rest, appears once
+  const bigOnce = unit.some(([t, c]) => t[0] === 'T' && parseInt(t.slice(1), 10) === maxS && c === 1);
+  const dominantHeading = bigOnce && maxS >= 22 && maxS >= minS * 1.5;
+
+  if (isCollection && hasImg) return 'Cards / Teasers';
+  if (isCollection && !hasImg) return wide ? 'Columns' : 'List / Accordion';
+  if (!isCollection && hasImg) return dominantHeading && maxS >= 30 ? 'Hero' : 'Media / Image + text';
+  if (dominantHeading) return 'Header / Title';
+  if (maxS <= 13 && size <= 3) return 'Meta / label';
+  return 'Heading + text';
 }
 
 const SIM = 0.88;       // cosine threshold for "same block"
@@ -88,7 +99,7 @@ function buildCatalog(perPage) {
   const rows = clusters.map((cl) => ({
     key: cl.rep.key, unit: cl.rep.unit, unitSize: cl.rep.unitSize, example: cl.example,
     pages: cl.pages, pageCount: cl.pages.size, instances: cl.instances, maxRepeat: cl.maxRepeat,
-    isCollection: cl.maxRepeat >= 2, type: guessType(cl.rep.unit, cl.maxRepeat >= 2), samples: [...cl.samples],
+    isCollection: cl.maxRepeat >= 2, type: guessType(cl.rep.unit, cl.maxRepeat >= 2, cl.example), samples: [...cl.samples],
   }));
   return rows.sort((a, b) => b.pageCount - a.pageCount || b.instances - a.instances);
 }
