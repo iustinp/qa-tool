@@ -31,6 +31,8 @@ function boxGap(a, b) {
 }
 function median(xs) { if (!xs.length) return 0; const s = [...xs].sort((a, b) => a - b); return s[s.length >> 1]; }
 function sizeBucket(fs) { return Math.round((fs || 0) / 2) * 2; }
+function gcd2(a, b) { while (b) { [a, b] = [b, a % b]; } return a; }
+function tokSize(t) { if (t.startsWith('IMG')) return 'i'; const m = t.match(/^T(\d+)/); return m ? m[1] : '?'; }
 
 function makeUF(n) {
   const p = Array.from({ length: n }, (_, i) => i);
@@ -45,6 +47,9 @@ function keyTokens(key) {
   const nb = rest ? rest.split(',').map((s) => s.split(':')[1]) : [];
   return [own, ...nb];
 }
+// node label SEEDS the clustering (kept as the validated version: heterogeneous local structure
+// or an image -> block seed). The prose-vs-block refinement lives in the FINAL region type
+// (structuralType), NOT here, so assembly/merge stay exactly as validated.
 function labelNode(key, bucket) {
   if (CHROME_BUCKETS.has(bucket)) return 'chrome';
   const toks = keyTokens(key);
@@ -89,15 +94,39 @@ function assembleRegions(nodes, keyBucket) {
       x2: Math.max(...rn.map((r) => r.x + r.w)), y2: Math.max(...rn.map((r) => r.y + r.h)),
     };
   };
-  const typeOf = (idxs) => {
+  // merge/assembly type (validated): a component is "block" if ANY member is a block seed.
+  // Used ONLY to decide which components merge — keeps card assembly exactly as validated.
+  const labelType = (idxs) => {
     const ls = idxs.map((i) => label[i]);
     return ls.includes('block') ? 'block' : ls.includes('prose') ? 'prose' : 'chrome';
+  };
+
+  // FINAL reported type — structural, so a body paragraph with a bold run or a caption is
+  // body-DOMINATED -> prose; a card/columns is a COLLECTION or has an image or balanced tiers.
+  const structuralType = (idxs) => {
+    const rn = idxs.map((i) => nodes[i]);
+    const chromeFrac = idxs.filter((i) => label[i] === 'chrome').length / rn.length;
+    if (chromeFrac >= 0.6) return 'chrome';
+    const texts = rn.filter((x) => x.kind === 'text');
+    const images = rn.filter((x) => x.kind !== 'text');
+    const counts = new Map();
+    for (const n of rn) { const t = styleToken(n); counts.set(t, (counts.get(t) || 0) + 1); }
+    const repeat = [...counts.values()].reduce((a, b) => gcd2(a, b), 0) || 1;
+    // a real COLLECTION is a multi-part unit repeated (>=2 distinct tokens); N copies of ONE
+    // token is just uniform body text, not a collection.
+    if (repeat >= 2 && counts.size >= 2) return 'block'; // cards / columns / list
+    if (images.length >= 1) return 'block';     // media / hero / single card
+    const tiers = new Map();
+    for (const t of texts) { const s = sizeBucket(t.fontSize); tiers.set(s, (tiers.get(s) || 0) + 1); }
+    const dom = texts.length ? Math.max(...tiers.values()) / texts.length : 0;
+    if (dom >= 0.6) return 'prose';             // body-text dominated -> default content
+    return 'block';                             // genuinely mixed single instance
   };
 
   // second pass — merge neighbouring BLOCK components into one region: a card row (thumbnail +
   // text + its siblings) becomes a single "Cards" block; the repeating unit inside is Strategy A.
   const MERGE = Math.max(80, gapThresh * 2.5);
-  const gi = groups.map((idxs) => ({ idxs, box: bbox(idxs), type: typeOf(idxs) }));
+  const gi = groups.map((idxs) => ({ idxs, box: bbox(idxs), type: labelType(idxs) }));
   const ruf = makeUF(gi.length);
   for (let a = 0; a < gi.length; a++) {
     for (let b = a + 1; b < gi.length; b++) {
@@ -114,7 +143,7 @@ function assembleRegions(nodes, keyBucket) {
   const regions = [];
   for (const idxs of merged.values()) {
     const rn = idxs.map((i) => nodes[i]);
-    const type = typeOf(idxs);
+    const type = structuralType(idxs);
     const texts = rn.filter((x) => x.kind === 'text');
     const images = rn.filter((x) => x.kind !== 'text');
     const tiers = new Set(texts.map((t) => sizeBucket(t.fontSize)));
