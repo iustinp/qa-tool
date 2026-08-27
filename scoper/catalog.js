@@ -17,12 +17,17 @@ const { styleToken } = require('./signature');
 
 function gcdAll(arr) { return arr.reduce((a, b) => { while (b) { [a, b] = [b, a % b]; } return a; }, 0) || 1; }
 
+// coarse count bucket: 1,2,3,"4+". Makes the signature tolerant of variable INTERNAL length
+// (a content block with 5 vs 6 vs 7 body lines groups as one), while the GCD reduction below
+// separately absorbs MULTIPLICITY (2 vs 3 cards). Together: fuzzy grouping of the same block.
+function countBucket(c) { return c <= 1 ? '' : c === 2 ? ':2' : c === 3 ? ':3' : ':4+'; }
+
 function canonical(region) {
   const counts = new Map();
   for (const n of region.nodes) { const t = styleToken(n); counts.set(t, (counts.get(t) || 0) + 1); }
   const g = gcdAll([...counts.values()]);
   const unit = [...counts.entries()].map(([t, c]) => [t, c / g]).sort((a, b) => (a[0] < b[0] ? -1 : 1));
-  const key = unit.map(([t, c]) => (c > 1 ? `${t}:${c}` : t)).join('+');
+  const key = unit.map(([t, c]) => `${t}${countBucket(c)}`).join('+');
   const unitSize = unit.reduce((s, [, c]) => s + c, 0);
   return { key, unit, repeat: g, unitSize };
 }
@@ -42,21 +47,49 @@ function guessType(unit, isCollection) {
   return 'Block';
 }
 
-// perPage: [{url, regions}] -> ranked catalog of block units
+const SIM = 0.88;       // cosine threshold for "same block"
+const SIZE_RATIO = 0.6; // and node counts within this ratio (a blob can't swallow a small card)
+
+function cosine(a, b) {
+  let dot = 0, na = 0, nb = 0;
+  for (const [, c] of a) na += c * c;
+  for (const [, c] of b) nb += c * c;
+  for (const [t, c] of a) { const d = b.get(t); if (d) dot += c * d; }
+  return dot / (Math.sqrt(na) * Math.sqrt(nb) || 1);
+}
+
+// perPage: [{url, regions}] -> ranked catalog of block units.
+// Group by cosine similarity over the GCD-reduced UNIT token vectors: reducing by GCD first
+// normalises MULTIPLICITY (1 card vs a 3-card row → same size-4 unit), then cosine tolerates
+// ±body-lines and an optional token, and a unit-SIZE gate stops a big blob from swallowing a
+// small card. Greedy single pass over units ordered by size desc (deterministic); each joins the
+// first cluster within SIM+size, else seeds a new one (largest unit = representative).
 function buildCatalog(perPage) {
-  const cat = new Map();
-  for (const pg of perPage) {
-    for (const r of pg.regions) {
-      if (r.type !== 'block') continue;
-      const c = canonical(r);
-      let e = cat.get(c.key);
-      if (!e) { e = { key: c.key, unit: c.unit, unitSize: c.unitSize, pages: new Set(), instances: 0, maxRepeat: 1, samples: new Set(), example: null }; cat.set(c.key, e); }
-      e.pages.add(pg.url); e.instances++; e.maxRepeat = Math.max(e.maxRepeat, c.repeat);
-      if (!e.example || r.count > e.example.count) e.example = { region: r, url: pg.url };
-      for (const n of r.nodes) if (n.kind === 'text' && n.text && e.samples.size < 6) e.samples.add(n.text.slice(0, 46));
-    }
+  const items = [];
+  for (const pg of perPage) for (const r of pg.regions) if (r.type === 'block') {
+    const c = canonical(r);
+    items.push({ r, url: pg.url, c, vec: new Map(c.unit), size: c.unitSize });
   }
-  const rows = [...cat.values()].map((e) => ({ ...e, isCollection: e.maxRepeat >= 2, type: guessType(e.unit, e.maxRepeat >= 2), pageCount: e.pages.size, samples: [...e.samples] }));
+  items.sort((a, b) => b.size - a.size || (a.c.key < b.c.key ? -1 : 1));
+
+  const clusters = [];
+  for (const it of items) {
+    let hit = null;
+    for (const cl of clusters) {
+      const ratio = Math.min(it.size, cl.repSize) / Math.max(it.size, cl.repSize);
+      if (ratio >= SIZE_RATIO && cosine(it.vec, cl.repVec) >= SIM) { hit = cl; break; }
+    }
+    if (!hit) { hit = { repVec: it.vec, repSize: it.size, rep: it.c, example: { region: it.r, url: it.url }, pages: new Set(), instances: 0, maxRepeat: 1, samples: new Set() }; clusters.push(hit); }
+    hit.pages.add(it.url); hit.instances++; hit.maxRepeat = Math.max(hit.maxRepeat, it.c.repeat);
+    if (it.r.count > hit.example.region.count) hit.example = { region: it.r, url: it.url };
+    for (const n of it.r.nodes) if (n.kind === 'text' && n.text && hit.samples.size < 6) hit.samples.add(n.text.slice(0, 46));
+  }
+
+  const rows = clusters.map((cl) => ({
+    key: cl.rep.key, unit: cl.rep.unit, unitSize: cl.rep.unitSize, example: cl.example,
+    pages: cl.pages, pageCount: cl.pages.size, instances: cl.instances, maxRepeat: cl.maxRepeat,
+    isCollection: cl.maxRepeat >= 2, type: guessType(cl.rep.unit, cl.maxRepeat >= 2), samples: [...cl.samples],
+  }));
   return rows.sort((a, b) => b.pageCount - a.pageCount || b.instances - a.instances);
 }
 
