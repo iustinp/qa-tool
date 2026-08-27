@@ -44,21 +44,26 @@ const COLOR = { chrome: '#8a94a6', block: '#1a9e6a', prose: '#3b76d1' };
 function renderPage(pg, scale) {
   const nodeMaxX = Math.max(...pg.nodes.map((n) => n.x + n.w), 100);
   const nodeMaxY = Math.max(...pg.nodes.map((n) => n.y + n.h), 100);
-  // The screenshot spans the DOCUMENT CSS size (clm.width x clm.height); node coords live in that
-  // same CSS space (some may overflow it horizontally, e.g. off-screen carousel slides). Register
-  // the backdrop against clm dims — sizing the img explicitly to clm.width/height*S makes it match
-  // the boxes regardless of the screenshot's intrinsic pixel size / DPR. The page box grows to fit
-  // any overflow nodes so they're still visible beyond the screenshot edge.
-  const docW = pg.width || nodeMaxX;
-  const docH = pg.height || nodeMaxY;
-  const pageW = Math.max(docW, nodeMaxX);
-  const pageH = Math.max(docH, nodeMaxY);
   const S = scale;
   const shot = pg.dir && path.join(pg.dir, 'screenshots', 'source-full.png');
-  const bg = shot && fs.existsSync(shot) ? `data:image/png;base64,${fs.readFileSync(shot).toString('base64')}` : null;
+
+  // The screenshot's TRUE css document size = its own pixel dimensions / DPR (clm.width is only the
+  // viewport and can differ from the document width). Node coords live in that same css space (some
+  // overflow it, e.g. off-screen carousel slides). Display the img at ONE uniform scale S with its
+  // aspect preserved (width=shotW*S, height=shotH*S both derived from the same px/DPR), so pixel
+  // (x,y) lands at (x/DPR)*S == the box coordinate. No distortion in either axis.
+  let bg = null, shotW = pg.width || nodeMaxX, shotH = pg.height || nodeMaxY;
+  if (shot && fs.existsSync(shot)) {
+    const buf = fs.readFileSync(shot);
+    shotW = buf.readUInt32BE(16) / pg.dpr;   // PNG IHDR width  / DPR  -> css width
+    shotH = buf.readUInt32BE(20) / pg.dpr;   // PNG IHDR height / DPR  -> css height
+    bg = `data:image/png;base64,${buf.toString('base64')}`;
+  }
+  const pageW = Math.max(shotW, nodeMaxX);
+  const pageH = Math.max(shotH, nodeMaxY);
 
   const parts = [`<div class="page" style="width:${(pageW * S).toFixed(0)}px;height:${(pageH * S).toFixed(0)}px">`];
-  if (bg) parts.push(`<img class="bg" src="${bg}" style="width:${(docW * S).toFixed(0)}px;height:${(docH * S).toFixed(0)}px">`);
+  if (bg) parts.push(`<img class="bg" src="${bg}" style="width:${(shotW * S).toFixed(0)}px;height:${(shotH * S).toFixed(0)}px">`);
   else {
     // fallback: render pear text/images faintly so there's still a backdrop
     for (const n of pg.nodes) {

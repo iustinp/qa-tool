@@ -64,7 +64,7 @@ function loadPears(runDir, file = 'source-clm.json') {
     if (!fs.existsSync(f)) continue;
     try {
       const j = JSON.parse(fs.readFileSync(f, 'utf8'));
-      if (Array.isArray(j.nodes) && j.nodes.length) out.push({ url: j.url || d.name, nodes: j.nodes, dir: path.join(runDir, d.name), width: j.width, height: j.height });
+      if (Array.isArray(j.nodes) && j.nodes.length) out.push({ url: j.url || d.name, nodes: j.nodes, dir: path.join(runDir, d.name), width: j.width, height: j.height, dpr: j.dpr || 1 });
     } catch { /* skip unreadable */ }
   }
   return out;
