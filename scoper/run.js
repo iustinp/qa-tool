@@ -13,7 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 const { loadPears } = require('./signature');
-const { scope, regionsHtml, catalogHtml, attachCrops } = require('./report');
+const { scope, regionsHtml, catalogHtml, latticeHtml, attachCrops } = require('./report');
 
 const pearsDir = process.argv[2];
 if (!pearsDir) { console.error('usage: node scoper/run.js <pearsDir> [label] [nSamples]'); process.exit(1); }
@@ -34,6 +34,7 @@ await attachCrops(catalog); // real screenshot crop per catalog block
 
 fs.writeFileSync(path.join(outDir, 'catalog.html'), catalogHtml(catalog, { pages: pears.length }));
 fs.writeFileSync(path.join(outDir, 'regions.html'), regionsHtml(perPage, { nSamples, title: `${label} regions` }));
+fs.writeFileSync(path.join(outDir, 'lattices.html'), latticeHtml(perPage, { nSamples }));
 
 // slim, machine-readable catalog (no node arrays)
 const slim = catalog.map((b, i) => ({ rank: i + 1, type: b.type, isCollection: b.isCollection, pageCount: b.pageCount, instances: b.instances, maxRepeat: b.maxRepeat, signature: b.key, exampleUrl: b.example && b.example.url, samples: b.samples.slice(0, 6) }));
@@ -47,7 +48,7 @@ table{border-collapse:collapse;margin-top:10px;font-size:13px} td,th{border:1px 
 .sig{font-family:ui-monospace,monospace;font-size:11px;color:#1a7} h1{font-size:18px}</style>
 <h1>scoper run — ${esc(label)}</h1>
 <p>${pears.length} pages · ${rows ? slim.filter((b) => b.pageCount >= 2).length : 0} recurring block types · ${esc(pearsDir)}</p>
-<a class="big" href="catalog.html">Block catalog →</a><a class="big" href="regions.html">Region overlays →</a>
+<a class="big" href="catalog.html">Block catalog →</a><a class="big" href="lattices.html">Repeating peers →</a><a class="big" href="regions.html">Region overlays →</a>
 <table><tr><th>#</th><th>EDS type (guess)</th><th>pages</th><th>inst</th><th>coll</th><th>signature</th></tr>${rows}</table>`);
 
 console.log(`\nscoper run -> ${outDir}`);

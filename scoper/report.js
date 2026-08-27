@@ -11,6 +11,7 @@ const sharp = require('sharp'); // already a project dep; used exactly like lib/
 const { classifyDescriptors } = require('./chrome');
 const { assembleRegions } = require('./regions');
 const { canonical, guessType, buildCatalog } = require('./catalog');
+const { detectPageLattices } = require('./lattice');
 
 function scope(pears) {
   const { keyBucket } = classifyDescriptors(pears);
@@ -26,13 +27,11 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 const COLOR = { chrome: '#8a94a6', block: '#1a9e6a', prose: '#3b76d1' };
 const edsType = (r) => { const c = canonical(r); return guessType(c.unit, c.repeat >= 2, { region: r }); };
 
-// ---- regions overlay (screenshot backdrop + EDS type labels) --------------
-function renderPage(pg, S) {
+// screenshot backdrop (uniform-scale, registers with node coords); shared by both overlays
+function backdrop(pg, S) {
   const nodeMaxX = Math.max(...pg.nodes.map((n) => n.x + n.w), 100);
   const nodeMaxY = Math.max(...pg.nodes.map((n) => n.y + n.h), 100);
   const shot = pg.dir && path.join(pg.dir, 'screenshots', 'source-full.png');
-  // screenshot's true css doc size = its png px / DPR (clm.width is only the viewport); display it
-  // at ONE uniform scale S with aspect preserved so it registers with node coords in both axes.
   let bg = null, shotW = pg.width || nodeMaxX, shotH = pg.height || nodeMaxY;
   if (shot && fs.existsSync(shot)) {
     const buf = fs.readFileSync(shot);
@@ -41,20 +40,62 @@ function renderPage(pg, S) {
     bg = `data:image/png;base64,${buf.toString('base64')}`;
   }
   const pageW = Math.max(shotW, nodeMaxX), pageH = Math.max(shotH, nodeMaxY);
-  const parts = [`<div class="page" style="width:${(pageW * S).toFixed(0)}px;height:${(pageH * S).toFixed(0)}px">`];
-  if (bg) parts.push(`<img class="bg" src="${bg}" style="width:${(shotW * S).toFixed(0)}px;height:${(shotH * S).toFixed(0)}px">`);
+  const open = [`<div class="page" style="width:${(pageW * S).toFixed(0)}px;height:${(pageH * S).toFixed(0)}px">`];
+  if (bg) open.push(`<img class="bg" src="${bg}" style="width:${(shotW * S).toFixed(0)}px;height:${(shotH * S).toFixed(0)}px">`);
   else for (const n of pg.nodes) {
-    if (n.kind === 'text') parts.push(`<div class="tx" style="left:${(n.x * S).toFixed(0)}px;top:${(n.y * S).toFixed(0)}px;width:${(n.w * S).toFixed(0)}px;height:${(n.h * S).toFixed(0)}px;font-size:${Math.max(6, n.fontSize * S).toFixed(0)}px;font-weight:${esc(n.fontWeight)}">${esc(n.text || '')}</div>`);
-    else parts.push(`<div class="im" style="left:${(n.x * S).toFixed(0)}px;top:${(n.y * S).toFixed(0)}px;width:${(n.w * S).toFixed(0)}px;height:${(n.h * S).toFixed(0)}px">img</div>`);
+    if (n.kind === 'text') open.push(`<div class="tx" style="left:${(n.x * S).toFixed(0)}px;top:${(n.y * S).toFixed(0)}px;width:${(n.w * S).toFixed(0)}px;height:${(n.h * S).toFixed(0)}px;font-size:${Math.max(6, n.fontSize * S).toFixed(0)}px;font-weight:${esc(n.fontWeight)}">${esc(n.text || '')}</div>`);
+    else open.push(`<div class="im" style="left:${(n.x * S).toFixed(0)}px;top:${(n.y * S).toFixed(0)}px;width:${(n.w * S).toFixed(0)}px;height:${(n.h * S).toFixed(0)}px">img</div>`);
   }
-  for (const r of pg.regions) {
-    const c = COLOR[r.type];
-    const label = r.type === 'block' ? edsType(r) : r.type;
-    parts.push(`<div class="rg" style="left:${(r.x * S).toFixed(0)}px;top:${(r.y * S).toFixed(0)}px;width:${(r.w * S).toFixed(0)}px;height:${(r.h * S).toFixed(0)}px;border-color:${c}"><span class="tag" style="background:${c}">${esc(label)}</span></div>`);
-  }
-  parts.push('</div>');
+  return { open, hasBg: !!bg };
+}
+const box = (b, S, color, label, cls = 'rg') =>
+  `<div class="${cls}" style="left:${(b.x * S).toFixed(0)}px;top:${(b.y * S).toFixed(0)}px;width:${(b.w * S).toFixed(0)}px;height:${(b.h * S).toFixed(0)}px;border-color:${color}"><span class="tag" style="background:${color}">${esc(label)}</span></div>`;
+
+// ---- regions overlay (screenshot backdrop + EDS type labels) --------------
+function renderPage(pg, S) {
+  const { open, hasBg } = backdrop(pg, S);
+  for (const r of pg.regions) open.push(box(r, S, COLOR[r.type], r.type === 'block' ? edsType(r) : r.type));
+  open.push('</div>');
   const counts = pg.regions.reduce((m, r) => (m[r.type] = (m[r.type] || 0) + 1, m), {});
-  return `<h3>${esc(pg.url)}${bg ? '' : '  <em>(no screenshot)</em>'}</h3><p class="cnt">block:${counts.block || 0} chrome:${counts.chrome || 0} prose:${counts.prose || 0}</p>${parts.join('')}`;
+  return `<h3>${esc(pg.url)}${hasBg ? '' : '  <em>(no screenshot)</em>'}</h3><p class="cnt">block:${counts.block || 0} chrome:${counts.chrome || 0} prose:${counts.prose || 0}</p>${open.join('')}`;
+}
+
+// ---- lattice overlay (detected repeating peers drawn on the page) ----------
+function renderLatticePage(pg, S) {
+  const { open } = backdrop(pg, S);
+  const lats = detectPageLattices(pg.nodes);
+  for (const L of lats) {
+    const color = L.hasImage ? '#d6009e' : '#e07b00';
+    const label = `${L.axis}×${L.count}  ${L.tokens.slice(0, 5).join('+')}`;
+    open.push(box(L.bbox, S, color, label, 'lt'));
+  }
+  open.push('</div>');
+  return `<h3>${esc(pg.url)}</h3><p class="cnt">${lats.length} repeating peers</p>${open.join('')}`;
+}
+
+function latticeHtml(perPage, { nSamples = 8 } = {}) {
+  const hasShot = (pg) => pg.dir && fs.existsSync(path.join(pg.dir, 'screenshots', 'source-full.png'));
+  const sample = [...perPage].sort((a, b) => (hasShot(b) ? 1 : 0) - (hasShot(a) ? 1 : 0)).slice(0, nSamples);
+  const s0W = sample[0] ? (sample[0].width || Math.max(...sample[0].nodes.map((n) => n.x + n.w), 900)) : 900;
+  const S = 900 / s0W;
+  const body = sample.map((pg) => renderLatticePage(pg, S)).join('<hr>');
+  return `<!doctype html><meta charset="utf8"><title>scoper lattices</title>
+<style>
+ body{font:13px system-ui;margin:20px;color:#222}
+ .legend span{display:inline-block;padding:2px 8px;margin-right:6px;border-radius:3px;color:#fff}
+ .page{position:relative;border:1px solid #eee;margin:8px 0 28px;background:#fff;overflow:hidden}
+ .bg{position:absolute;left:0;top:0;opacity:.5}
+ .lt{position:absolute;border:3px solid;border-radius:3px;box-sizing:border-box}
+ .lt .tag{position:absolute;left:-1px;top:-16px;font-size:10px;color:#fff;padding:1px 5px;border-radius:3px;white-space:nowrap;font-family:ui-monospace,monospace;z-index:2}
+ .tx{position:absolute;color:#555;overflow:hidden;white-space:nowrap;line-height:1}
+ .im{position:absolute;background:#f0ede6;border:1px dashed #b7ad97;color:#b7ad97;font-size:9px;text-align:center;box-sizing:border-box}
+ h3{margin:24px 0 2px;font-size:13px;color:#555;word-break:break-all}
+ .cnt{margin:0 0 6px;color:#888;font-family:ui-monospace,monospace} hr{border:0;border-top:1px dashed #ddd;margin:30px 0}
+</style>
+<h2>scoper — detected repeating peers (lattices)</h2>
+<p class="legend"><span style="background:#d6009e">image-anchored (cards/gallery/media)</span><span style="background:#e07b00">text-only (list/columns/grid)</span></p>
+<p>${perPage.length} pages · showing ${sample.length}. Each box = a repeating peer; label = axis×count + content-blind composition.</p>
+${body}`;
 }
 
 function regionsHtml(perPage, { nSamples = 8, title = 'scoper regions' } = {}) {
@@ -159,4 +200,4 @@ function catalogHtml(catalog, { pages } = {}) {
 <div class="grid">${cards}</div>`;
 }
 
-module.exports = { scope, regionsHtml, catalogHtml, attachCrops };
+module.exports = { scope, regionsHtml, catalogHtml, latticeHtml, attachCrops };
