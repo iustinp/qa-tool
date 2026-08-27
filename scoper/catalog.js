@@ -25,8 +25,27 @@ function countBucket(c) { return c <= 1 ? '' : c === 2 ? ':2' : c === 3 ? ':3' :
 function canonical(region) {
   const counts = new Map();
   for (const n of region.nodes) { const t = styleToken(n); counts.set(t, (counts.get(t) || 0) + 1); }
-  const g = gcdAll([...counts.values()]);
-  const unit = [...counts.entries()].map(([t, c]) => [t, c / g]).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  const entries = [...counts.entries()];
+  const maxC = Math.max(...entries.map(([, c]) => c));
+
+  // Separate a lone section-heading / scaffolding (tokens appearing ONCE) from the REPEATED
+  // items before taking the GCD — otherwise a single heading above a card grid (count 1) drags
+  // the GCD to 1 and the collection is missed (was typed Hero instead of Cards). The repeat
+  // multiplicity is the GCD of the repeated (count>=2) tokens; singletons ride along at count 1.
+  let bulk = entries, extras = [], g = 1;
+  if (maxC >= 2) {
+    const rep = entries.filter(([, c]) => c >= 2);       // repeated tokens
+    const gg = gcdAll(rep.map(([, c]) => c));
+    // a REAL collection is a multi-part unit repeated (>=2 distinct repeated tokens) OR a single
+    // token repeated many times (a long list). A lone token appearing 2-3x among singletons
+    // (e.g. two byline lines in a header) is NOT a collection.
+    const realCollection = gg >= 2 && (rep.length >= 2 || (rep.length === 1 && rep[0][1] >= 4));
+    if (realCollection) { extras = entries.filter(([, c]) => c === 1); bulk = rep; g = gg; }
+  }
+  const unit = [
+    ...bulk.map(([t, c]) => [t, Math.max(1, Math.round(c / g))]),
+    ...extras.map(([t]) => [t, 1]),
+  ].sort((a, b) => (a[0] < b[0] ? -1 : 1));
   const key = unit.map(([t, c]) => `${t}${countBucket(c)}`).join('+');
   const unitSize = unit.reduce((s, [, c]) => s + c, 0);
   return { key, unit, repeat: g, unitSize };
