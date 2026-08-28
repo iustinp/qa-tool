@@ -94,21 +94,33 @@ function imagePeers(nodes) {
       const hx = P / 2, hy = py / 2;
       instances = cells.map((c) => nodes.filter((n) => Math.abs(cx(n) - cx(c)) < hx && Math.abs(cy(n) - cy(c)) < hy));
     } else {
-      const along = L.kind === 'H' ? cx : cy;
-      instances = cells.map((c) => nodes.filter((n) => Math.abs(along(n) - along(c)) < P / 2));
+      // 1D: within the along-window, grow a CROSS-contiguous cluster out from the image, breaking
+      // at a whitespace gap — so a card = image + adjacent text, not a full-height strip that
+      // swallows a header/footer sitting at the same x (the tall-thin-box bug).
+      const along = L.kind === 'H' ? cx : cy, cross = L.kind === 'H' ? cy : cx;
+      const crossGap = Math.max(40, P * 0.6);
+      instances = cells.map((c) => {
+        const win = nodes.filter((n) => Math.abs(along(n) - along(c)) < P / 2).sort((a, b) => cross(a) - cross(b));
+        const ci = win.indexOf(c);
+        if (ci < 0) return [c];
+        const keep = [c];
+        for (let i = ci + 1; i < win.length; i++) { if (cross(win[i]) - cross(win[i - 1]) < crossGap) keep.push(win[i]); else break; }
+        for (let i = ci - 1; i >= 0; i--) { if (cross(win[i + 1]) - cross(win[i]) < crossGap) keep.push(win[i]); else break; }
+        return keep;
+      });
     }
     // consistent composition = tokens present in >=40% of the groups
     const tokCells = new Map();
     for (const inst of instances) for (const t of new Set(inst.map(styleToken))) tokCells.set(t, (tokCells.get(t) || 0) + 1);
     const keep = new Set([...tokCells].filter(([, c]) => c >= Math.max(2, cells.length * 0.4)).map(([t]) => t));
-    const instNodes = instances.map((inst) => inst.filter((n) => keep.has(styleToken(n))));
+    const instNodes = instances.map((inst) => inst.filter((n) => keep.has(styleToken(n)))).filter((a) => a.length);
     const flat = instNodes.flat();
     if (!flat.length) continue;
     peers.push({
       kind: 'image', axis: L.kind, period: P, count: cells.length,
       tokens: [...keep].sort((a, b) => (b.startsWith('IMG') ? 1 : 0) - (a.startsWith('IMG') ? 1 : 0)),
       hasImage: true, is2D: L.kind === '2D', block: true,
-      bbox: bboxOf(flat), instances: instNodes.filter((a) => a.length).map(bboxOf),
+      bbox: bboxOf(flat), instances: instNodes.map(bboxOf), instanceNodes: instNodes,
       _text: new Set(flat.filter((n) => n.kind === 'text')),
     });
   }

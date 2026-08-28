@@ -64,15 +64,26 @@ function renderPage(pg, S) {
 function renderLatticePage(pg, S) {
   const { open } = backdrop(pg, S);
   const lats = detectPageLattices(pg.nodes);
-  for (const L of lats) {
+  lats.forEach((L, li) => {
     const color = L.hasImage ? '#d6009e' : '#e07b00';
-    const label = `${L.axis}×${L.count}  ${L.tokens.slice(0, 5).join('+')}`;
-    const inst = L.instances && L.instances.length ? L.instances : [L.bbox];
-    for (const ib of inst) open.push(`<div class="lti" style="left:${(ib.x * S).toFixed(0)}px;top:${(ib.y * S).toFixed(0)}px;width:${(ib.w * S).toFixed(0)}px;height:${(ib.h * S).toFixed(0)}px;border-color:${color}"></div>`);
+    const label = `#${li + 1} ${L.axis}×${L.count}  ${L.tokens.slice(0, 5).join('+')}`;
+    const instBoxes = L.instances && L.instances.length ? L.instances : [L.bbox];
+    const instNodes = L.instanceNodes || [];
+    instBoxes.forEach((ib, ii) => {
+      // debug tooltip: the actual pear texts considered for this instance
+      const texts = (instNodes[ii] || []).filter((n) => n.kind === 'text').map((n) => n.text).filter(Boolean);
+      const tip = esc(texts.join(' | ')).slice(0, 400);
+      open.push(`<div class="lti" title="${tip}" style="left:${(ib.x * S).toFixed(0)}px;top:${(ib.y * S).toFixed(0)}px;width:${(ib.w * S).toFixed(0)}px;height:${(ib.h * S).toFixed(0)}px;border-color:${color}"></div>`);
+    });
+    // render the CONSIDERED pear texts (so the box contents are visible / weird boxes explainable)
+    for (const inst of instNodes) for (const n of inst) {
+      if (n.kind !== 'text' || !n.text) continue;
+      open.push(`<div class="dbgtx" style="left:${(n.x * S).toFixed(0)}px;top:${(n.y * S).toFixed(0)}px;max-width:${(n.w * S + 20).toFixed(0)}px;color:${color}">${esc(n.text.slice(0, 60))}</div>`);
+    }
     open.push(`<div class="ltl" style="left:${(L.bbox.x * S).toFixed(0)}px;top:${(L.bbox.y * S - 15).toFixed(0)}px;background:${color}">${esc(label)}</div>`);
-  }
+  });
   open.push('</div>');
-  return `<h3>${esc(pg.url)}</h3><p class="cnt">${lats.length} repeating peers (each thin box = one instance of the group)</p>${open.join('')}`;
+  return `<h3>${esc(pg.url)}</h3><p class="cnt">${lats.length} repeating peers · thin box = one instance · coloured text = pear content considered · hover a box for its texts</p>${open.join('')}`;
 }
 
 function latticeHtml(perPage, { nSamples = 8 } = {}) {
@@ -89,6 +100,7 @@ function latticeHtml(perPage, { nSamples = 8 } = {}) {
  .bg{position:absolute;left:0;top:0;opacity:.5}
  .lti{position:absolute;border:2px solid;border-radius:3px;box-sizing:border-box}
  .ltl{position:absolute;font-size:10px;color:#fff;padding:1px 5px;border-radius:3px;white-space:nowrap;font-family:ui-monospace,monospace;z-index:2}
+ .dbgtx{position:absolute;font-size:9px;line-height:1;background:rgba(255,255,255,.82);padding:0 1px;overflow:hidden;white-space:nowrap;z-index:1;font-weight:600}
  .tx{position:absolute;color:#555;overflow:hidden;white-space:nowrap;line-height:1}
  .im{position:absolute;background:#f0ede6;border:1px dashed #b7ad97;color:#b7ad97;font-size:9px;text-align:center;box-sizing:border-box}
  h3{margin:24px 0 2px;font-size:13px;color:#555;word-break:break-all}
