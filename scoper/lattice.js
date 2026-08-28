@@ -66,34 +66,50 @@ function tokenLattice(group) {
   return { kind: pick.kind, nodes: pick.nodes, bbox: bboxOf(pick.nodes), period: pick.period };
 }
 
-// --- image-anchored peers: image lattice + local text per cell ---------------
+// --- image-anchored peers: FOLD the region into period-windows (level-2 group) -
+// Level 1 = repeating images / repeating texts. Level 2 = realising one text belongs to one
+// image, so the image+text GROUP repeats. We detect the image lattice (period + axis), then slice
+// space into one period-window PER image cell; each window captures that whole card (image + its
+// own text) -> the group. The group repetition supersedes the base image/text repetitions.
 function imagePeers(nodes) {
   const imgs = nodes.filter((n) => n.kind !== 'text');
-  const texts = nodes.filter((n) => n.kind === 'text');
   const byTok = new Map();
   for (const n of imgs) { const t = styleToken(n); if (!byTok.has(t)) byTok.set(t, []); byTok.get(t).push(n); }
   const peers = [];
-  for (const [tok, group] of byTok) {
+  for (const group of byTok.values()) {
     if (group.length < 3) continue;
     const L = tokenLattice(group);
     if (!L) continue;
     const cells = L.nodes;
-    const radius = Math.max(L.period || 160, 140);
-    const assignedByCell = cells.map(() => []);
-    const used = new Set();
-    for (const t of texts) {
-      let bi = -1, bd = Infinity;
-      for (let i = 0; i < cells.length; i++) { const d = Math.hypot(cx(t) - cx(cells[i]), cy(t) - cy(cells[i])); if (d < bd) { bd = d; bi = i; } }
-      if (bi >= 0 && bd < radius) { assignedByCell[bi].push(t); used.add(t); }
+    const P = L.period || 160;
+    // FOLD each image cell into one group instance = image + the nodes that belong to it.
+    // 2D grid: a cell is bounded in both axes (±px/2, ±py/2). 1D: bind by ALONG-axis alignment
+    // only (a text in the same row/slice as the image belongs to it) — NO cross bound, so a wide
+    // card's far-side text still joins; the consistency filter drops anything not in most cells.
+    let instances;
+    if (L.kind === '2D') {
+      const band = Math.max(8, median(cells.map((n) => n.h)) * 0.8);
+      const rowY = clusterBand(cells, cy, band).map((r) => median(r.map(cy))).sort((a, b) => a - b);
+      const py = median(rowY.slice(1).map((y, i) => y - rowY[i])) || P;
+      const hx = P / 2, hy = py / 2;
+      instances = cells.map((c) => nodes.filter((n) => Math.abs(cx(n) - cx(c)) < hx && Math.abs(cy(n) - cy(c)) < hy));
+    } else {
+      const along = L.kind === 'H' ? cx : cy;
+      instances = cells.map((c) => nodes.filter((n) => Math.abs(along(n) - along(c)) < P / 2));
     }
-    // text tokens present in a majority of cells = the card's consistent composition
+    // consistent composition = tokens present in >=40% of the groups
     const tokCells = new Map();
-    for (const arr of assignedByCell) for (const t of new Set(arr.map(styleToken))) tokCells.set(t, (tokCells.get(t) || 0) + 1);
-    const consistent = [...tokCells].filter(([, c]) => c >= Math.max(2, cells.length * 0.4)).map(([t]) => t);
+    for (const inst of instances) for (const t of new Set(inst.map(styleToken))) tokCells.set(t, (tokCells.get(t) || 0) + 1);
+    const keep = new Set([...tokCells].filter(([, c]) => c >= Math.max(2, cells.length * 0.4)).map(([t]) => t));
+    const instNodes = instances.map((inst) => inst.filter((n) => keep.has(styleToken(n))));
+    const flat = instNodes.flat();
+    if (!flat.length) continue;
     peers.push({
-      kind: 'image', axis: L.kind, period: L.period, count: cells.length,
-      tokens: [tok, ...consistent], hasImage: true, is2D: L.kind === '2D', block: true,
-      bbox: bboxOf([...cells, ...used]), _text: used,
+      kind: 'image', axis: L.kind, period: P, count: cells.length,
+      tokens: [...keep].sort((a, b) => (b.startsWith('IMG') ? 1 : 0) - (a.startsWith('IMG') ? 1 : 0)),
+      hasImage: true, is2D: L.kind === '2D', block: true,
+      bbox: bboxOf(flat), instances: instNodes.filter((a) => a.length).map(bboxOf),
+      _text: new Set(flat.filter((n) => n.kind === 'text')),
     });
   }
   return peers;

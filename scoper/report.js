@@ -67,10 +67,12 @@ function renderLatticePage(pg, S) {
   for (const L of lats) {
     const color = L.hasImage ? '#d6009e' : '#e07b00';
     const label = `${L.axis}×${L.count}  ${L.tokens.slice(0, 5).join('+')}`;
-    open.push(box(L.bbox, S, color, label, 'lt'));
+    const inst = L.instances && L.instances.length ? L.instances : [L.bbox];
+    for (const ib of inst) open.push(`<div class="lti" style="left:${(ib.x * S).toFixed(0)}px;top:${(ib.y * S).toFixed(0)}px;width:${(ib.w * S).toFixed(0)}px;height:${(ib.h * S).toFixed(0)}px;border-color:${color}"></div>`);
+    open.push(`<div class="ltl" style="left:${(L.bbox.x * S).toFixed(0)}px;top:${(L.bbox.y * S - 15).toFixed(0)}px;background:${color}">${esc(label)}</div>`);
   }
   open.push('</div>');
-  return `<h3>${esc(pg.url)}</h3><p class="cnt">${lats.length} repeating peers</p>${open.join('')}`;
+  return `<h3>${esc(pg.url)}</h3><p class="cnt">${lats.length} repeating peers (each thin box = one instance of the group)</p>${open.join('')}`;
 }
 
 function latticeHtml(perPage, { nSamples = 8 } = {}) {
@@ -85,8 +87,8 @@ function latticeHtml(perPage, { nSamples = 8 } = {}) {
  .legend span{display:inline-block;padding:2px 8px;margin-right:6px;border-radius:3px;color:#fff}
  .page{position:relative;border:1px solid #eee;margin:8px 0 28px;background:#fff;overflow:hidden}
  .bg{position:absolute;left:0;top:0;opacity:.5}
- .lt{position:absolute;border:3px solid;border-radius:3px;box-sizing:border-box}
- .lt .tag{position:absolute;left:-1px;top:-16px;font-size:10px;color:#fff;padding:1px 5px;border-radius:3px;white-space:nowrap;font-family:ui-monospace,monospace;z-index:2}
+ .lti{position:absolute;border:2px solid;border-radius:3px;box-sizing:border-box}
+ .ltl{position:absolute;font-size:10px;color:#fff;padding:1px 5px;border-radius:3px;white-space:nowrap;font-family:ui-monospace,monospace;z-index:2}
  .tx{position:absolute;color:#555;overflow:hidden;white-space:nowrap;line-height:1}
  .im{position:absolute;background:#f0ede6;border:1px dashed #b7ad97;color:#b7ad97;font-size:9px;text-align:center;box-sizing:border-box}
  h3{margin:24px 0 2px;font-size:13px;color:#555;word-break:break-all}
