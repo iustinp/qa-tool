@@ -20,3 +20,6 @@ debug-*/
 
 # canonical-layout prototype scratch output
 clm-out*/
+
+# scoper experiment (#65) run outputs
+scoper-run_*
