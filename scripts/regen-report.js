@@ -9,10 +9,13 @@
  *
  * summary.json already stores both URLs and every score per pair, so the report
  * is rebuilt with the current generator (lib/score-report.js) using only that file.
+ * CUSTOMER-Report.html is rebuilt too (it additionally reads each pair's
+ * pairs/<slug>/layout-audit.json for the missing/extra text elements).
  */
 const fs = require('fs');
 const path = require('path');
 const { writeScoreReport } = require('../lib/score-report');
+const { writeCustomerReport } = require('../lib/customer-report');
 
 const dirs = process.argv.slice(2);
 if (!dirs.length) {
@@ -33,4 +36,6 @@ for (const dir of dirs) {
     : `report regenerated ${new Date().toISOString()}`;
   const p = writeScoreReport(dir, rows, { pairCount: rows.length, generatedAt });
   console.log(`wrote ${p} (${rows.length} pairs)`);
+  const cp = writeCustomerReport(dir, rows, { pairCount: rows.length, generatedAt });
+  console.log(`wrote ${cp} (${rows.length} pairs)`);
 }

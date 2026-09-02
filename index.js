@@ -18,6 +18,7 @@ const { processPair } = require('./lib/pair-worker');
 const { loadRecipe, DEFAULT_RECIPE } = require('./lib/recipe');
 const { createCacheStore, isCacheEnabled } = require('./lib/cache-store');
 const { writeScoreReport } = require('./lib/score-report');
+const { writeCustomerReport } = require('./lib/customer-report');
 
 function screeningSummaryFields(report) {
   const s = report.screening;
@@ -545,6 +546,11 @@ async function main() {
     generatedAt: new Date().toISOString(),
   });
   console.log(`Wrote ${reportPath}`);
+  const customerReportPath = writeCustomerReport(outDir, reportRows, {
+    pairCount: results.length,
+    generatedAt: new Date().toISOString(),
+  });
+  console.log(`Wrote ${customerReportPath}`);
 
   const screeningCsvPath = path.join(outDir, 'screening-summary.csv');
   const screeningHeader =
