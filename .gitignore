@@ -10,6 +10,8 @@ test-run*/
 clm-out*/
 page-pair-diff-run-*/
 debug-*/
+# Default run folders: <YYYYMMDDHHMMSS>_<csv filename> (14-digit timestamp prefix)
+[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_*/
 
 # Persistent result cache
 .ppd-cache/
@@ -20,3 +22,6 @@ debug-*/
 
 # canonical-layout prototype scratch output
 clm-out*/
+
+# csv files
+*.csv

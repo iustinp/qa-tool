@@ -134,13 +134,16 @@ function parseCsvFile(filePath) {
   const lines = content.split(/\r?\n/).filter((l) => l.trim());
   const rows = [];
   let start = 0;
-  if (lines.length && /^source\s*,\s*target/i.test(lines[0])) start = 1;
+  if (lines.length && /^\s*source\s*[,;]\s*target/i.test(lines[0])) start = 1;
   for (let i = start; i < lines.length; i++) {
     const line = lines[i];
-    const comma = line.indexOf(',');
-    if (comma <= 0) continue;
-    const source = line.slice(0, comma).trim().replace(/^"|"$/g, '');
-    const target = line.slice(comma + 1).trim().replace(/^"|"$/g, '');
+    // Pair separator is the first comma OR semicolon (whichever appears first), so both
+    // `source,target` and `source;target` files work. Position 0 is not a valid separator.
+    const seps = [line.indexOf(','), line.indexOf(';')].filter((n) => n > 0);
+    if (!seps.length) continue;
+    const sep = Math.min(...seps);
+    const source = line.slice(0, sep).trim().replace(/^"|"$/g, '');
+    const target = line.slice(sep + 1).trim().replace(/^"|"$/g, '');
     if (source && target) rows.push({ source, target });
   }
   return rows;
@@ -172,10 +175,12 @@ async function runPool(items, concurrency, fn) {
 function printHelp() {
   console.log(`
 Usage: node index.js --csv <pairs.csv> [--out <dir>] [--threads N] [--max-iterations N] [--recipe <file>]
+  --out <dir>   output folder (default: <YYYYMMDDHHMMSS>_<csv filename>, e.g. 20260910001251_usta.csv)
 
-CSV format (header optional):
+CSV format (header optional; comma OR semicolon between the two URLs):
   source,target
   https://example.com/original,https://example.com/migrated
+  https://example.com/original;https://example.com/migrated   # ';' also works
 
 Optional per-site recipe (YAML) — see recipe.example.yaml and ROADMAP.md:
   --recipe <file>          Load ignore/mask/normalize rules, capture profiles, interaction
@@ -362,9 +367,17 @@ async function main() {
       ? args.layoutCanonical
       : !(process.env.PPD_LAYOUT_CANONICAL === '0' || process.env.PPD_LAYOUT_CANONICAL === 'false');
 
+  // Default run folder: <local-timestamp>_<csv filename>, e.g. 20260910001251_usta.csv —
+  // date first so runs sort chronologically and the source file is obvious at a glance.
+  // Matches `date +%Y%m%d%H%M%S` (local time). Override wholesale with --out.
+  const stamp = (() => {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  })();
   const outDir =
     args.outDir ||
-    path.join(process.cwd(), `page-pair-diff-run-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}`);
+    path.join(process.cwd(), `${stamp}_${path.basename(args.csv)}`);
 
   fs.mkdirSync(outDir, { recursive: true });
 
