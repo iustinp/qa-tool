@@ -10,6 +10,8 @@ test-run*/
 clm-out*/
 page-pair-diff-run-*/
 debug-*/
+scoper*/
+
 # Default run folders: <YYYYMMDDHHMMSS>_<csv filename> (14-digit timestamp prefix)
 [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_*/
 
@@ -25,3 +27,6 @@ clm-out*/
 
 # csv files
 *.csv
+
+# htmls that get created around .md files
+/*.html

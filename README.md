@@ -24,7 +24,8 @@ node index.js --probe-bedrock
 ## Run
 
 ```bash
-node index.js --csv pairs.csv
+# Deterministic, AI-free text + layout audit (no credentials needed):
+node index.js --csv pairs.csv --text-only
 ```
 
 With no `--out`, results land in `./<YYYYMMDDHHMMSS>_<csv filename>/` (date first, so runs sort chronologically and the source file is obvious — e.g. `20260910143512_pairs.csv/`).
@@ -41,18 +42,14 @@ https://example.com/other;https://example.com/other-migrated
 ### Common examples
 
 ```bash
-# Deterministic, AI-free text + layout audit (no credentials needed):
-node index.js --csv pairs.csv --text-only
+# NOT TO BE USED LIKE THIS!!! This was the first version of the qa-tool which tried and failed miserably to use AI to QA migrated pages - You should NOT use this, always make sure you have --text-only:
+node index.js --csv pairs.csv
 
-# …plus the one-hop interaction crawl (tabs/accordions/modals), 5 pairs in parallel:
+# --crawl adds the the N-hop interaction crawl (clicks through tabs/accordions/modals/whatever is clickable or hoverable), and saves each state for reprocessing. --threads = 5 pairs in parallel. - !STILL NEEDS WORK:
 node index.js --csv pairs.csv --text-only --crawl --threads 5
 
 # Tag a run's folder while keeping the date prefix:
 node index.js --csv pairs.csv --text-only --out ./"$(date +%Y%m%d%H%M%S)_baseline"
-
-# Full pipeline including AI block segment/match (needs Bedrock/Anthropic auth):
-node index.js --csv pairs.csv --threads 3
-```
 
 Open `pairs/<slug>/layout-review.html` from a run to inspect the source↔target overlay (matched/missing/extra boxes, drift connectors).
 
@@ -61,11 +58,11 @@ Open `pairs/<slug>/layout-review.html` from a run to inspect the source↔target
 | Option | Default | Purpose |
 |--------|---------|---------|
 | `--csv <file>` | — (required) | Pairs file (comma- or semicolon-separated `source,target`). |
-| `--out <dir>` | `<YYYYMMDDHHMMSS>_<csv filename>` | Output folder. |
-| `--threads N` | `1` | Pairs processed in parallel. |
-| `--max-iterations N` | `40` | Cap on the AI segment/match loop per pair. |
+| `--out <dir>` | `<YYYYMMDDHHMMSS>_<csv filename>` | Specify Output folder. |
+| `--threads N` | `1` | Pairs processed in parallel. Be careful not to get blocked - 5-8 threads is usually ok, from 10+ even our EDS will block you |
+| `--max-iterations N` | `40` | Cap on the AI segment/match loop per pair |
 | `--text-only` | off | Capture + text/layout audit only — no image screening, no AI, no credentials. |
-| `--screening-only` | off | Capture + local screening only; no AI loop. |
+| `--screening-only` | off | Capture + local screening only; no AI loop - This is also an older feature that tried to use local pre-AI checks and stops before using AI |
 | `--no-screening` | off | Force AI for every pair (skip the local pass/fail screen). |
 | `--crawl` | off | One-hop interaction crawl: click non-navigating triggers and compare revealed content (slower). |
 | `--layout-audit` / `--no-layout-audit` | on | Deterministic text-geometry audit → missing/extra copy + drift. |
