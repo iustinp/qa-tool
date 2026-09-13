@@ -50,10 +50,11 @@ node index.js --csv pairs.csv --text-only --crawl --threads 5
 
 # Tag a run's folder while keeping the date prefix:
 node index.js --csv pairs.csv --text-only --out ./"$(date +%Y%m%d%H%M%S)_baseline"
+```
 
-Open `pairs/<slug>/layout-review.html` from a run to inspect the source↔target overlay (matched/missing/extra boxes, drift connectors).
+Open `pairs/<slug>/layout-review.html` from a run to inspect the source↔target overlay (matched/missing/extra boxes, drift connectors). See [Reports](#reports) for what each output report shows.
 
-### Options
+## Options
 
 | Option | Default | Purpose |
 |--------|---------|---------|
@@ -74,6 +75,43 @@ Open `pairs/<slug>/layout-review.html` from a run to inspect the source↔target
 | `--help`, `-h` | — | Full option + environment reference. |
 
 Run `node index.js --help` for the complete list, including `PPD_*` environment tuning.
+
+## Reports
+
+> ⚠️ **This tool is being developed fast.** The reports change often, and the UI may gain or lose controls before this description catches up. If something on screen doesn't match what's written here, trust the screen — and the tooltips (hover any toolbar control in the layout review).
+
+A run produces three HTML reports. Open them straight from the run folder (they are self-contained — they also work over `file://`).
+
+### `report.html` — the internal scoreboard
+
+The engineer-facing overview: one sortable row per pair.
+
+- **Columns:** *General Health %* (overall, higher = better), the *Content Completeness* family (Content %, Matched / Missing / Extra text counts), and the *Drift* family (*Drifting texts %* plus Small / Medium / Large drift counts). Health & Content are higher = better; Drift is lower = better — cells are colour-coded accordingly.
+- **Navigate:** click any column header to sort (click again to flip direction); the default is worst General Health first. Each row's **Source · Target** links open the two live pages (⌘/Ctrl-click or middle-click to open in a background tab); the **review ↗** link opens that pair's `layout-review.html`. Rows that failed to capture or score show "—" and sort last.
+
+### `CUSTOMER-Report.html` — the customer-facing summary
+
+A trimmed version of `report.html`, safe to share (all-caps name so it is never confused with the internal one). No health/drift internals, no review links.
+
+- **Columns:** *Original page* · *Edge Delivery page* (source/target links), the page path, *Content Completeness %*, and *Mismatches* (missing + extra count).
+- **Navigate:** click a **Mismatches** count to open a modal listing the actual text elements in two columns — *Only on Original page* (missing on target) and *Only on Edge Delivery page* (extra on target). Each cell has a **Copy** button, and double-click selects the cell's text. Each cell also has a comments textbox next to it, so that a user can write comments about that cell. After writing any comments, the user NEEDS to click the '💾 Save copy with comments' button to download a copy of the report with the comments inside (security limitations don't allow saving directly to the same file).
+
+### `pairs/<slug>/layout-review.html` — the per-pair overlay
+
+The deep-dive for a single pair: source and target text laid over the page so you can see exactly what moved, what's missing, and what's extra. One side fills the stage at a time.
+
+- **Opens on:** the **Target** (Edge Delivery) page, **Screenshot** backdrop, with **Connectors** on.
+- **Toolbar (hover any control for its tooltip):**
+  - **source / TARGET** — which page fills the stage. Click, or press **Spacebar**, to toggle.
+  - **Pear / Screenshot** — the backdrop: the reconstructed text canvas ("pear") vs the actual captured screenshot.
+  - **Source boxes / Target boxes** — draw each side's text-run boxes (green source / red target).
+  - **Matched** — colour matched pairs blue instead of the per-side colours.
+  - **Indices** — number each box in reading order.
+  - **Connectors** — line each matched source run to its target counterpart, coloured by positional drift (green ≤20px, yellow ≤40px, red >40px).
+  - **Clickable** — outline clickable/hoverable regions that can reveal any new text, and the interactive state-entry boxes you can click to descend into crawl-revealed content.
+  - **Revealed text / Hidden content** — highlight newly-revealed text inside a crawled state, and off-screen slider/carousel slides at their natural flow position.
+  - **Diffs** — open a side panel listing every missing / extra / matched run.
+- **Align two boxes:** click any box to rigidly shift the other side so that pair lines up (useful for reading residual drift); **Reset align** clears it.
 
 ## Configuration
 
