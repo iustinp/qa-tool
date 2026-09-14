@@ -12,10 +12,10 @@ cd qa-tool
 npm install
 npx playwright install chromium
 cp .env.example .env
-# Edit .env with AWS_BEARER_TOKEN_BEDROCK + AWS_REGION + ANTHROPIC_MODEL (or ANTHROPIC_API_KEY)
+# OPTIONAL: Edit .env with AWS_BEARER_TOKEN_BEDROCK + AWS_REGION + ANTHROPIC_MODEL (or ANTHROPIC_API_KEY). This is not needed by default.
 ```
 
-Verify Bedrock auth:
+Verify Bedrock auth if set above:
 
 ```bash
 node index.js --probe-bedrock
@@ -42,14 +42,16 @@ https://example.com/other;https://example.com/other-migrated
 ### Common examples
 
 ```bash
-# NOT TO BE USED LIKE THIS!!! This was the first version of the qa-tool which tried and failed miserably to use AI to QA migrated pages - You should NOT use this, always make sure you have --text-only:
-node index.js --csv pairs.csv
-
-# --crawl adds the the N-hop interaction crawl (clicks through tabs/accordions/modals/whatever is clickable or hoverable), and saves each state for reprocessing. --threads = 5 pairs in parallel. - !STILL NEEDS WORK:
+# Using --crawl adds the the N-hop interaction crawl (clicks through tabs/accordions/modals/whatever is clickable or hoverable), and saves each state for reprocessing. --threads = 5 pairs in parallel. - !STILL NEEDS WORK:
 node index.js --csv pairs.csv --text-only --crawl --threads 5
 
 # Tag a run's folder while keeping the date prefix:
 node index.js --csv pairs.csv --text-only --out ./"$(date +%Y%m%d%H%M%S)_baseline"
+
+
+# Old AI-only way - NOT TO BE USED LIKE THIS because it's slow and unreliable! This was the first version of the qa-tool which tried and failed miserably to use AI to QA migrated pages - You should NOT use this, always make sure you have --text-only:
+node index.js --csv pairs.csv
+
 ```
 
 Open `pairs/<slug>/layout-review.html` from a run to inspect the source↔target overlay (matched/missing/extra boxes, drift connectors). See [Reports](#reports) for what each output report shows.
