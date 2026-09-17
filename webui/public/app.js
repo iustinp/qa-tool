@@ -37,6 +37,30 @@
     return 'queued';
   }
 
+  // Config chips showing how a run was configured (Mode + ignore/click counts).
+  // The actual selectors appear on hover so past runs stay understandable.
+  function runConfigChips(r) {
+    const cnt = (a) => (Array.isArray(a) ? a.length : 0);
+    const chips = [`<span class="chip">${escapeHtml(r.mode || 'full')}</span>`];
+    const titleFor = (label, s, t) => {
+      const parts = [];
+      if (cnt(s)) parts.push(`source:\n  ${s.join('\n  ')}`);
+      if (cnt(t)) parts.push(`target:\n  ${t.join('\n  ')}`);
+      return `${label}\n${parts.join('\n')}`;
+    };
+    if (cnt(r.ignoreSource) || cnt(r.ignoreTarget)) {
+      chips.push(
+        `<span class="chip" title="${escapeHtml(titleFor('Ignored', r.ignoreSource, r.ignoreTarget))}">ignore ${cnt(r.ignoreSource)}/${cnt(r.ignoreTarget)}</span>`
+      );
+    }
+    if (cnt(r.clickSource) || cnt(r.clickTarget)) {
+      chips.push(
+        `<span class="chip" title="${escapeHtml(titleFor('Clicked', r.clickSource, r.clickTarget))}">click ${cnt(r.clickSource)}/${cnt(r.clickTarget)}</span>`
+      );
+    }
+    return chips.join('');
+  }
+
   function renderRuns(runs) {
     if (!runs.length) {
       els.runsList.innerHTML = '<p class="empty">No runs yet. Start one above.</p>';
@@ -49,6 +73,14 @@
         <div class="run-main">
           <div class="run-label">${escapeHtml(r.label)}</div>
           <div class="run-meta">${r.pairCount} pair(s) · ${fmtTime(r.createdAt)}</div>
+          <div class="run-config">${runConfigChips(r)}</div>
+          ${
+            r.status === 'done' && (r.analyzed != null || r.loadErrors)
+              ? `<div class="run-stat">${r.analyzed ?? '?'} analyzed${
+                  r.loadErrors ? ` · <span class="err-count">${r.loadErrors} load error${r.loadErrors === 1 ? '' : 's'}</span>` : ''
+                }</div>`
+              : ''
+          }
         </div>
         <div class="run-side">
           <span class="status ${statusClass(r.status)}">${r.stage || r.status}</span>

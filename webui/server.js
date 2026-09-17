@@ -157,10 +157,13 @@ function runReal(job) {
     child.on('close', (code) => {
       logStream.end();
       if (code === 0) {
+        const { analyzed, loadErrors } = summarizeRun(outDir);
         touch(job, {
           status: 'done',
           stage: 'done',
           progress: 100,
+          analyzed,
+          loadErrors,
           resultsUrl: `/api/runs/${job.id}/results`,
           reportUrl: reportRelUrl(job, 'report.html'),
         });
@@ -247,20 +250,14 @@ function buildResults(job) {
       r.slug && fileExists(job, `pairs/${r.slug}/screenshots/${side}-full.png`)
         ? reportRelUrl(job, `pairs/${r.slug}/screenshots/${side}-full.png`)
         : null;
-    // "Missing" = source content not found on target. The right field depends on
-    // the path: text-only fills contentMissingEntirelyCount (from the content
-    // compare), while the legacy AI/vision path fills missingCount. Take whichever
-    // reported, so the count is correct in every mode.
-    const missing = Math.max(r.contentMissingEntirelyCount || 0, r.missingCount || 0);
-    const coverage =
-      typeof r.textCoverage === 'number' ? ` · ${Math.round(r.textCoverage * 100)}% coverage` : '';
+    // Per-pair: report whether it loaded/analyzed. Detailed quality (missing,
+    // coverage, layout) lives in the per-pair review — a single aggregate number
+    // here would be misleading across a large run.
     return {
       source: r.sourceUrl,
       target: r.targetUrl,
-      status: r.captureError ? 'error' : missing > 0 ? 'review' : 'ok',
-      note: r.captureError
-        ? String(r.captureError).slice(0, 80)
-        : `${missing} missing${coverage} · ${r.finishedReason || 'done'}`,
+      status: r.captureError ? 'error' : 'ok',
+      note: r.captureError ? `load error: ${String(r.captureError).slice(0, 70)}` : 'analyzed',
       reviewUrl: r.slug ? reportRelUrl(job, `pairs/${r.slug}/layout-review.html`) : null,
       sourceShot: shot('source'),
       targetShot: shot('target'),
@@ -277,6 +274,19 @@ function buildResults(job) {
       : null,
     pairs,
   };
+}
+
+// Count pairs analyzed vs. pairs that failed to load (captureError). This is the
+// one run-level aggregate that's genuinely additive across a large run.
+function summarizeRun(outDir) {
+  try {
+    const summary = JSON.parse(fs.readFileSync(path.join(outDir, 'summary.json'), 'utf8'));
+    const rows = summary.results || [];
+    const loadErrors = rows.filter((r) => r.captureError).length;
+    return { analyzed: rows.length - loadErrors, loadErrors };
+  } catch {
+    return { analyzed: null, loadErrors: null };
+  }
 }
 
 function reportRelUrl(job, rel) {

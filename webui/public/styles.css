@@ -98,11 +98,17 @@ button.ghost { background: transparent; }
 .runs { display: flex; flex-direction: column; gap: 10px; }
 .empty { color: var(--muted); font-size: 13px; }
 .run {
-  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px;
 }
 .run-label { font-weight: 600; }
 .run-meta { font-size: 12px; color: var(--muted); }
+.run-config { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.chip { font-size: 11px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; cursor: default; }
+.chip[title] { cursor: help; }
+.run-stat { font-size: 12px; color: var(--muted); margin-top: 6px; }
+.err-count { color: var(--err); }
+.run-main { min-width: 0; }
 .run-side { display: flex; align-items: center; gap: 10px; min-width: 200px; justify-content: flex-end; }
 .status { font-size: 12px; padding: 2px 9px; border-radius: 999px; text-transform: capitalize; }
 .status.ok { background: rgba(63,185,80,.15); color: var(--ok); }
