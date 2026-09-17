@@ -38,10 +38,10 @@ const API = (() => {
 
   return {
     health: () => request('/api/health'),
-    createRun: ({ label, csv, mode, ignoreSource, ignoreTarget }) =>
+    createRun: ({ label, csv, mode, ignoreSource, ignoreTarget, clickSource, clickTarget }) =>
       request('/api/runs', {
         method: 'POST',
-        body: JSON.stringify({ label, csv, mode, ignoreSource, ignoreTarget }),
+        body: JSON.stringify({ label, csv, mode, ignoreSource, ignoreTarget, clickSource, clickTarget }),
       }),
     listRuns: () => request('/api/runs'),
     getRun: (jobId) => request(`/api/runs/${jobId}`),

@@ -9,6 +9,8 @@
     modeSelect: $('#modeSelect'),
     ignoreSource: $('#ignoreSource'),
     ignoreTarget: $('#ignoreTarget'),
+    clickSource: $('#clickSource'),
+    clickTarget: $('#clickTarget'),
     browseBtn: $('#browseBtn'),
     csvFile: $('#csvFile'),
     startBtn: $('#startBtn'),
@@ -110,6 +112,8 @@
         mode: els.modeSelect.value,
         ignoreSource: toLines(els.ignoreSource.value),
         ignoreTarget: toLines(els.ignoreTarget.value),
+        clickSource: toLines(els.clickSource.value),
+        clickTarget: toLines(els.clickTarget.value),
       });
       els.startMsg.textContent = `Started (${jobId.slice(0, 8)}…)`;
       els.pairs.value = '';

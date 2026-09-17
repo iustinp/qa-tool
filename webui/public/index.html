@@ -56,6 +56,21 @@
         </label>
       </details>
 
+      <details class="ignore-box">
+        <summary>Click if present (CSS selectors)</summary>
+        <p class="hint">One CSS selector per line. If the element is on the page at load,
+          its first visible match is clicked before capture — e.g. a cookie
+          <strong>Accept</strong> or <strong>Deny</strong> button. Runs even without AI.</p>
+        <label class="field">
+          <span>Click on <strong>source</strong></span>
+          <textarea id="clickSource" rows="2" placeholder="#onetrust-accept-btn-handler"></textarea>
+        </label>
+        <label class="field">
+          <span>Click on <strong>target</strong></span>
+          <textarea id="clickTarget" rows="2" placeholder=".cookie-accept"></textarea>
+        </label>
+      </details>
+
       <div class="actions">
         <button id="startBtn" class="primary">Start run</button>
         <span id="startMsg" class="msg"></span>

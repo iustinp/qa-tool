@@ -34,6 +34,18 @@ ignoreTarget:
   - selector: ".known-broken-block"
     reason: known-issue-tracked-separately
 
+# Click-if-present — before capture, if the element is on the page its first
+# visible match is clicked. Use for consent/cookie buttons (Accept OR Deny — you
+# choose the scenario to test), "enter site" gates, etc. Runs deterministically,
+# even in text-only mode (unlike the AI/vision overlay dismissal). Per-side, since
+# source and target selectors differ.
+clickSource:
+  - selector: "#onetrust-accept-btn-handler"
+    reason: accept-cookies
+clickTarget:
+  - selector: ".cookie-consent__accept"
+    reason: accept-cookies
+
 # Excluded from VISUAL diff only (content still audited) — regions that legitimately
 # change on their own and would cause false visual diffs.
 mask:

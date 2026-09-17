@@ -48,7 +48,7 @@ const jobs = new Map();
 const queue = [];
 let runningCount = 0;
 
-function createJob({ label, pairs, mode, ignoreSource, ignoreTarget }) {
+function createJob({ label, pairs, mode, ignoreSource, ignoreTarget, clickSource, clickTarget }) {
   const id = randomUUID();
   const now = Date.now();
   const job = {
@@ -57,6 +57,8 @@ function createJob({ label, pairs, mode, ignoreSource, ignoreTarget }) {
     mode: RUN_MODES[mode] ? mode : 'full',
     ignoreSource: ignoreSource || [],
     ignoreTarget: ignoreTarget || [],
+    clickSource: clickSource || [],
+    clickTarget: clickTarget || [],
     status: 'queued',
     stage: 'queued',
     progress: 0,
@@ -110,12 +112,20 @@ function runReal(job) {
 
     const args = ['index.js', '--csv', csvPath, '--out', outDir, ...RUN_MODES[job.mode]];
 
-    // If the run has per-side ignore selectors, emit a recipe and pass --recipe.
-    // JSON is valid YAML, so we can write the recipe without a YAML dependency.
-    if (job.ignoreSource.length || job.ignoreTarget.length) {
+    // If the run has per-side ignore or click selectors, emit a recipe and pass
+    // --recipe. JSON is valid YAML, so we write it without a YAML dependency.
+    if (
+      job.ignoreSource.length ||
+      job.ignoreTarget.length ||
+      job.clickSource.length ||
+      job.clickTarget.length
+    ) {
+      const asRules = (list) => list.map((selector) => ({ selector, reason: 'ui' }));
       const recipe = {
-        ignoreSource: job.ignoreSource.map((selector) => ({ selector, reason: 'ui' })),
-        ignoreTarget: job.ignoreTarget.map((selector) => ({ selector, reason: 'ui' })),
+        ignoreSource: asRules(job.ignoreSource),
+        ignoreTarget: asRules(job.ignoreTarget),
+        clickSource: asRules(job.clickSource),
+        clickTarget: asRules(job.clickTarget),
       };
       const recipePath = path.join(job.runDir, 'recipe.yaml');
       fs.writeFileSync(recipePath, JSON.stringify(recipe, null, 2));
@@ -376,6 +386,8 @@ const server = http.createServer(async (req, res) => {
         mode: body.mode,
         ignoreSource: parseSelectors(body.ignoreSource),
         ignoreTarget: parseSelectors(body.ignoreTarget),
+        clickSource: parseSelectors(body.clickSource),
+        clickTarget: parseSelectors(body.clickTarget),
       });
       return sendJson(res, 201, { jobId: job.id, status: job.status });
     }

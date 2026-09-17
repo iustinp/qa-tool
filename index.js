@@ -441,6 +441,8 @@ async function main() {
       ignore: recipe.ignore,
       ignoreSource: recipe.ignoreSource,
       ignoreTarget: recipe.ignoreTarget,
+      clickSource: recipe.clickSource,
+      clickTarget: recipe.clickTarget,
       cacheStore,
       layoutAudit: layoutAuditEnabled,
       layoutOcr: layoutOcrEnabled,
