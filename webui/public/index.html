@@ -29,17 +29,23 @@
           <button type="button" id="browseBtn" class="link-btn">Browse CSV…</button>
           <input id="csvFile" type="file" accept=".csv,text/csv" hidden multiple />
         </span>
-        <textarea id="pairsInput" rows="7"
+        <textarea id="pairsInput" rows="7" wrap="off"
           placeholder="https://old.example.com/page,https://new.example.com/page"></textarea>
       </label>
-      <label class="field">
-        <span>Mode</span>
-        <select id="modeSelect">
-          <option value="full">Full (screening + AI)</option>
-          <option value="text-only" selected>Text-only (no AI)</option>
-          <option value="screening-only">Screening-only (no AI)</option>
-        </select>
-      </label>
+      <div class="field-row">
+        <label class="field">
+          <span>Mode</span>
+          <select id="modeSelect">
+            <option value="full">Full (screening + AI)</option>
+            <option value="text-only" selected>Text-only (no AI)</option>
+            <option value="screening-only">Screening-only (no AI)</option>
+          </select>
+        </label>
+        <label class="field threads-field">
+          <span>Threads</span>
+          <input id="threadsInput" type="number" min="1" max="16" step="1" value="1" />
+        </label>
+      </div>
 
       <details class="ignore-box">
         <summary>Ignore known issues (CSS selectors)</summary>

@@ -7,6 +7,7 @@
     label: $('#labelInput'),
     pairs: $('#pairsInput'),
     modeSelect: $('#modeSelect'),
+    threads: $('#threadsInput'),
     ignoreSource: $('#ignoreSource'),
     ignoreTarget: $('#ignoreTarget'),
     clickSource: $('#clickSource'),
@@ -42,6 +43,7 @@
   function runConfigChips(r) {
     const cnt = (a) => (Array.isArray(a) ? a.length : 0);
     const chips = [`<span class="chip">${escapeHtml(r.mode || 'full')}</span>`];
+    if (r.threads > 1) chips.push(`<span class="chip">${r.threads} threads</span>`);
     const titleFor = (label, s, t) => {
       const parts = [];
       if (cnt(s)) parts.push(`source:\n  ${s.join('\n  ')}`);
@@ -142,6 +144,7 @@
         label: els.label.value.trim(),
         csv,
         mode: els.modeSelect.value,
+        threads: Math.max(1, parseInt(els.threads.value, 10) || 1),
         ignoreSource: toLines(els.ignoreSource.value),
         ignoreTarget: toLines(els.ignoreTarget.value),
         clickSource: toLines(els.clickSource.value),

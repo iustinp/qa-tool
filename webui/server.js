@@ -48,13 +48,14 @@ const jobs = new Map();
 const queue = [];
 let runningCount = 0;
 
-function createJob({ label, pairs, mode, ignoreSource, ignoreTarget, clickSource, clickTarget }) {
+function createJob({ label, pairs, mode, threads, ignoreSource, ignoreTarget, clickSource, clickTarget }) {
   const id = randomUUID();
   const now = Date.now();
   const job = {
     id,
     label: label || `run-${new Date(now).toISOString().slice(0, 19)}`,
     mode: RUN_MODES[mode] ? mode : 'full',
+    threads: Math.min(16, Math.max(1, Number(threads) || 1)),
     ignoreSource: ignoreSource || [],
     ignoreTarget: ignoreTarget || [],
     clickSource: clickSource || [],
@@ -110,7 +111,7 @@ function runReal(job) {
     const logPath = path.join(job.runDir, 'engine.log');
     const logStream = fs.createWriteStream(logPath);
 
-    const args = ['index.js', '--csv', csvPath, '--out', outDir, ...RUN_MODES[job.mode]];
+    const args = ['index.js', '--csv', csvPath, '--out', outDir, '--threads', String(job.threads), ...RUN_MODES[job.mode]];
 
     // If the run has per-side ignore or click selectors, emit a recipe and pass
     // --recipe. JSON is valid YAML, so we write it without a YAML dependency.
@@ -409,6 +410,7 @@ const server = http.createServer(async (req, res) => {
         label: body.label,
         pairs,
         mode: body.mode,
+        threads: body.threads,
         ignoreSource: parseSelectors(body.ignoreSource),
         ignoreTarget: parseSelectors(body.ignoreTarget),
         clickSource: parseSelectors(body.clickSource),
