@@ -74,24 +74,54 @@
     const cnt = (a) => (Array.isArray(a) ? a.length : 0);
     const chips = [`<span class="chip">${escapeHtml(r.mode || 'full')}</span>`];
     if (r.threads > 1) chips.push(`<span class="chip">${r.threads} threads</span>`);
-    if (r.recipe) chips.push(`<span class="chip" title="Site recipe used">▦ ${escapeHtml(r.recipe)}</span>`);
-    const titleFor = (label, s, t) => {
-      const parts = [];
-      if (cnt(s)) parts.push(`source:\n  ${s.join('\n  ')}`);
-      if (cnt(t)) parts.push(`target:\n  ${t.join('\n  ')}`);
-      return `${label}\n${parts.join('\n')}`;
+    if (r.recipe) chips.push(`<span class="chip">▦ ${escapeHtml(r.recipe)}</span>`);
+    // A click-to-open, copyable popover of the actual selectors (data on the chip).
+    const popLines = (s, t) => {
+      const lines = [];
+      if (cnt(s)) lines.push('source:', ...s.map((x) => `  ${x}`));
+      if (cnt(t)) lines.push('target:', ...t.map((x) => `  ${x}`));
+      return lines.join('\n');
     };
-    if (cnt(r.ignoreSource) || cnt(r.ignoreTarget)) {
-      chips.push(
-        `<span class="chip" title="${escapeHtml(titleFor('Ignored', r.ignoreSource, r.ignoreTarget))}">ignore ${cnt(r.ignoreSource)}/${cnt(r.ignoreTarget)}</span>`
-      );
-    }
-    if (cnt(r.clickSource) || cnt(r.clickTarget)) {
-      chips.push(
-        `<span class="chip" title="${escapeHtml(titleFor('Clicked', r.clickSource, r.clickTarget))}">click ${cnt(r.clickSource)}/${cnt(r.clickTarget)}</span>`
-      );
-    }
+    const popChip = (label, title, s, t) =>
+      `<span class="chip chip-pop" data-pop-title="${escapeHtml(title)}" data-pop-lines="${escapeHtml(popLines(s, t))}">${label} ${cnt(s)}/${cnt(t)}</span>`;
+    if (cnt(r.ignoreSource) || cnt(r.ignoreTarget))
+      chips.push(popChip('ignore', 'Ignored', r.ignoreSource, r.ignoreTarget));
+    if (cnt(r.clickSource) || cnt(r.clickTarget))
+      chips.push(popChip('click', 'Clicked', r.clickSource, r.clickTarget));
     return chips.join('');
+  }
+
+  // Click-triggered, copyable popover for the ignore/click chips (replaces the
+  // slow, uncopyable native title tooltip). Closes on any outside click.
+  let openPop = null;
+  function closeChipPop() {
+    if (!openPop) return;
+    openPop.remove();
+    openPop = null;
+    document.removeEventListener('click', onOutsidePop, true);
+  }
+  function onOutsidePop(e) {
+    if (openPop && !openPop.contains(e.target)) closeChipPop();
+  }
+  function openChipPop(chip) {
+    closeChipPop();
+    const title = chip.dataset.popTitle || '';
+    const lines = (chip.dataset.popLines || '').split('\n');
+    const pop = document.createElement('div');
+    pop.className = 'chip-pop-panel';
+    pop.innerHTML =
+      `<div class="cp-title">${escapeHtml(title)}</div>` +
+      lines.map((l) => `<div class="cp-line">${escapeHtml(l)}</div>`).join('');
+    document.body.appendChild(pop);
+    const rect = chip.getBoundingClientRect();
+    const clientW = document.documentElement.clientWidth || window.innerWidth || 1200;
+    const minLeft = window.scrollX + 8;
+    const maxLeft = window.scrollX + clientW - pop.offsetWidth - 12;
+    const left = Math.max(minLeft, Math.min(rect.left + window.scrollX, Math.max(minLeft, maxLeft)));
+    pop.style.top = `${rect.bottom + window.scrollY + 4}px`;
+    pop.style.left = `${left}px`;
+    openPop = pop;
+    setTimeout(() => document.addEventListener('click', onOutsidePop, true), 0);
   }
 
   // --- Searchable multi-select site dropdown (scales to many sites) -----------
@@ -588,6 +618,17 @@
   // Wire up
   els.startBtn.addEventListener('click', startRun);
   els.refreshBtn.addEventListener('click', refreshRuns);
+  // Delegated (survives run-list re-renders): a chip click opens its popover.
+  els.runsList.addEventListener('click', (e) => {
+    const chip = e.target.closest('.chip-pop');
+    if (!chip) return;
+    e.stopPropagation();
+    if (openPop && openPop.dataset.forChip === chip.dataset.popLines) closeChipPop();
+    else {
+      openChipPop(chip);
+      if (openPop) openPop.dataset.forChip = chip.dataset.popLines;
+    }
+  });
   els.closeResults.addEventListener('click', () => {
     els.results.hidden = true;
     document.querySelector('.layout').classList.remove('show-results');

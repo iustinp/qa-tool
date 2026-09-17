@@ -149,7 +149,15 @@ button.ghost { background: transparent; }
 .run-meta { font-size: 12px; color: var(--muted); }
 .run-config { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
 .chip { font-size: 11px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; cursor: default; }
-.chip[title] { cursor: help; }
+.chip-pop { cursor: pointer; }
+.chip-pop:hover { border-color: var(--accent); }
+.chip-pop-panel {
+  position: absolute; z-index: 60; max-width: 360px; padding: 8px 10px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.5); user-select: text;
+}
+.cp-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 5px; }
+.cp-line { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--text); white-space: pre; overflow-x: auto; }
 .run-stat { font-size: 12px; color: var(--muted); margin-top: 6px; }
 .err-count { color: var(--err); }
 .run-main { min-width: 0; }
