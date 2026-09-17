@@ -35,6 +35,8 @@
   // toggling the filter re-renders without refetching.
   const siteFilter = new Set();
   let allRuns = [];
+  const RUNS_PAGE = 10;
+  let runsLimit = RUNS_PAGE; // cap the visible run history; "Load more" grows it
 
   function hostOf(u) {
     try {
@@ -160,6 +162,7 @@
         const s = b.dataset.site;
         if (siteFilter.has(s)) siteFilter.delete(s);
         else siteFilter.add(s);
+        runsLimit = RUNS_PAGE; // a new filter view starts from the top
         renderDropdownLists();
         updateTriggerLabel();
         renderRunsList();
@@ -170,6 +173,7 @@
     if (clear)
       clear.addEventListener('click', () => {
         siteFilter.clear();
+        runsLimit = RUNS_PAGE;
         renderDropdownLists();
         updateTriggerLabel();
         renderRunsList();
@@ -208,9 +212,12 @@
         : '<p class="empty">No runs yet. Start one above.</p>';
       return;
     }
-    els.runsList.innerHTML = shown
-      .map(
-        (r) => `
+    const visible = shown.slice(0, runsLimit);
+    const hidden = shown.length - visible.length;
+    els.runsList.innerHTML =
+      visible
+        .map(
+          (r) => `
       <div class="run" data-id="${r.id}">
         <div class="run-main">
           <div class="run-label">${escapeHtml(r.label)}</div>
@@ -234,11 +241,15 @@
                 ? `<button class="ghost view-btn" data-id="${r.id}">View</button>`
                 : ''
             }
+            <button class="ghost del-btn" data-id="${r.id}" title="Delete this run (removes it from disk)">✕</button>
           </div>
         </div>
       </div>`
-      )
-      .join('');
+        )
+        .join('') +
+      (hidden > 0
+        ? `<button class="ghost load-more" id="loadMoreRuns">Load ${Math.min(RUNS_PAGE, hidden)} more · ${hidden} older hidden</button>`
+        : '');
 
     els.runsList.querySelectorAll('.view-btn').forEach((b) =>
       b.addEventListener('click', () => openResults(b.dataset.id))
@@ -246,6 +257,32 @@
     els.runsList.querySelectorAll('.load-btn').forEach((b) =>
       b.addEventListener('click', () => loadRun(b.dataset.id))
     );
+    els.runsList.querySelectorAll('.del-btn').forEach((b) =>
+      b.addEventListener('click', () => deleteRun(b.dataset.id))
+    );
+    const more = els.runsList.querySelector('#loadMoreRuns');
+    if (more)
+      more.addEventListener('click', () => {
+        runsLimit += RUNS_PAGE;
+        renderRunsList();
+      });
+  }
+
+  // Delete a run (from the list and from disk).
+  async function deleteRun(jobId) {
+    const run = allRuns.find((r) => r.id === jobId);
+    const name = run ? run.label : jobId.slice(0, 8);
+    if (!window.confirm(`Delete run "${name}"? This removes it from disk and can't be undone.`)) return;
+    try {
+      if (polling.has(jobId)) {
+        clearInterval(polling.get(jobId));
+        polling.delete(jobId);
+      }
+      await API.deleteRun(jobId);
+      await refreshRuns();
+    } catch (e) {
+      els.startMsg.textContent = `Delete failed: ${e.message}`;
+    }
   }
 
   // Load a run's settings back into the New-run form (overwrites current values).
@@ -330,26 +367,48 @@
     }
   }
 
+  const PAIRS_PAGE = 20;
+  let resultsData = null;
+  let resultsPairsLimit = PAIRS_PAGE;
+
   async function openResults(jobId) {
     els.results.hidden = false;
     document.querySelector('.layout').classList.add('show-results');
     els.resultsBody.innerHTML = '<p class="empty">Loading…</p>';
     try {
-      const data = await API.getResults(jobId);
-      els.resultsTitle.textContent = `Results — ${data.label || jobId.slice(0, 8)}`;
-      const reportLinks = [];
-      if (data.reportUrl)
-        reportLinks.push(`<a class="report-link" href="${data.reportUrl}" target="_blank">Open full report ↗</a>`);
-      if (data.customerReportUrl)
-        reportLinks.push(`<a class="report-link" href="${data.customerReportUrl}" target="_blank">Customer report ↗</a>`);
-      const header = reportLinks.length
-        ? `<div class="report-links">${reportLinks.join('')}</div>`
+      resultsData = await API.getResults(jobId);
+      resultsPairsLimit = PAIRS_PAGE;
+      els.resultsTitle.textContent = `Results — ${resultsData.label || jobId.slice(0, 8)}`;
+      renderResultsPairs();
+    } catch (e) {
+      els.resultsBody.innerHTML = `<p class="empty">${escapeHtml(e.message)}</p>`;
+    }
+  }
+
+  // Render the results drawer, capping the number of pairs shown (a run can have
+  // thousands — the full set lives in the report behind "Open full report").
+  function renderResultsPairs() {
+    const data = resultsData;
+    if (!data) return;
+    const reportLinks = [];
+    if (data.reportUrl)
+      reportLinks.push(`<a class="report-link" href="${data.reportUrl}" target="_blank">Open full report ↗</a>`);
+    if (data.customerReportUrl)
+      reportLinks.push(`<a class="report-link" href="${data.customerReportUrl}" target="_blank">Customer report ↗</a>`);
+    const header = reportLinks.length ? `<div class="report-links">${reportLinks.join('')}</div>` : '';
+    const pairs = data.pairs || [];
+    const visible = pairs.slice(0, resultsPairsLimit);
+    const hidden = pairs.length - visible.length;
+    const countLine =
+      pairs.length > PAIRS_PAGE
+        ? `<div class="results-count">Showing ${visible.length} of ${pairs.length} pairs</div>`
         : '';
-      els.resultsBody.innerHTML =
-        header +
-        data.pairs
-          .map(
-            (p) => `
+    els.resultsBody.innerHTML =
+      header +
+      countLine +
+      visible
+        .map(
+          (p) => `
         <div class="pair">
           <div class="pair-info">
             <div class="pair-urls">
@@ -371,11 +430,17 @@
             }
           </div>
         </div>`
-          )
-          .join('');
-    } catch (e) {
-      els.resultsBody.innerHTML = `<p class="empty">${escapeHtml(e.message)}</p>`;
-    }
+        )
+        .join('') +
+      (hidden > 0
+        ? `<button class="ghost load-more" id="loadMorePairs">Load ${Math.min(PAIRS_PAGE, hidden)} more · ${hidden} not shown (full set in the report)</button>`
+        : '');
+    const more = els.resultsBody.querySelector('#loadMorePairs');
+    if (more)
+      more.addEventListener('click', () => {
+        resultsPairsLimit += PAIRS_PAGE;
+        renderResultsPairs();
+      });
   }
 
   function escapeHtml(s) {

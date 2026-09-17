@@ -46,6 +46,7 @@ const API = (() => {
     listRuns: () => request('/api/runs'),
     getRun: (jobId) => request(`/api/runs/${jobId}`),
     getResults: (jobId) => request(`/api/runs/${jobId}/results`),
+    deleteRun: (jobId) => request(`/api/runs/${jobId}`, { method: 'DELETE' }),
     listRecipes: () => request('/api/recipes'),
     saveRecipe: (recipe) =>
       request('/api/recipes', { method: 'POST', body: JSON.stringify(recipe) }),

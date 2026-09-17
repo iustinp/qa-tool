@@ -223,6 +223,10 @@ function runReal(job) {
 
     const child = spawn(process.execPath, args, { cwd: PROJECT_ROOT });
     job.pid = child.pid;
+    job.child = child; // kept so a delete can stop a running run
+    child.on('close', () => {
+      job.child = null;
+    });
 
     let buf = '';
     const onChunk = (data) => {
@@ -624,16 +628,34 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/api/runs' && req.method === 'GET') {
       const list = [...jobs.values()]
         .sort((a, b) => b.createdAt - a.createdAt)
-        .map(({ pairs, runDir, outDir, logPath, logTail, pid, ...rest }) => rest);
+        .map(({ pairs, runDir, outDir, logPath, logTail, pid, child, ...rest }) => rest);
       return sendJson(res, 200, { runs: list });
     }
 
     const runMatch = pathname.match(/^\/api\/runs\/([^/]+)$/);
+    if (runMatch && req.method === 'DELETE') {
+      const job = jobs.get(runMatch[1]);
+      if (!job) return sendJson(res, 404, { error: 'Run not found' });
+      try {
+        if (job.child) job.child.kill(); // stop a run in progress
+      } catch {
+        /* already gone */
+      }
+      jobs.delete(job.id); // a queued id left in the pump queue is skipped (jobs.get miss)
+      try {
+        if (job.runDir && job.runDir.startsWith(RUNS_DIR)) {
+          fs.rmSync(job.runDir, { recursive: true, force: true });
+        }
+      } catch {
+        /* best effort */
+      }
+      return sendJson(res, 200, { ok: true });
+    }
     if (runMatch && req.method === 'GET') {
       const job = jobs.get(runMatch[1]);
       if (!job) return sendJson(res, 404, { error: 'Run not found' });
       // Single-run detail includes pairs so the UI can reload the run into the form.
-      const { runDir, outDir, logPath, pid, logTail, ...rest } = job;
+      const { runDir, outDir, logPath, pid, logTail, child, ...rest } = job;
       return sendJson(res, 200, rest);
     }
 
