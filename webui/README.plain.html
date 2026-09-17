@@ -1,0 +1,42 @@
+<div><h1 id="webui--temporary-dev-server--web-ui-stubbed-backend">webui — temporary dev server + web UI (STUBBED backend)</h1>
+<p>Work-in-progress web UI for <code>page-pair-diff</code>, built so it fits <strong>either</strong> eventual
+deployment path (self-hosted local/team server, or cloud). See the repo root
+<code>DEPLOYMENT-ARCHITECTURE.md</code> for the decision context.</p>
+<h2 id="run-it">Run it</h2>
+<pre><code class="language-bash">node webui/server.js
+# then open http://localhost:4321
+</code></pre>
+<p>No dependencies — Node >= 18 only.</p>
+<h3 id="env-knobs">Env knobs</h3>
+<ul>
+<li><code>WEBUI_PORT</code> — port (default <code>4321</code>).</li>
+<li><code>WEBUI_ENGINE</code> — <code>real</code> (default) runs the actual engine; <code>stub</code> fakes runs in
+memory (no engine, no cost) for UI-only work / demos.</li>
+<li><code>WEBUI_MAX_CONCURRENT</code> — max simultaneous runs (default <code>2</code>). Chromium is heavy;
+extra runs queue. This is the "team server" concurrency knob.</li>
+</ul>
+<h2 id="how-the-real-backend-works">How the real backend works</h2>
+<p><code>POST /api/runs</code> writes the pasted/uploaded pairs to a CSV and spawns the existing
+engine — <code>node index.js --csv &#x3C;csv> --out &#x3C;runDir> [mode flag]</code> — as a child process
+per job. Progress is parsed from the engine's <code>[i/N]</code> stdout lines. When it exits,
+the run folder (<code>report.html</code>, <code>CUSTOMER-Report.html</code>, per-pair
+<code>pairs/&#x3C;slug>/layout-review.html</code>, screenshots) is served under
+<code>/api/runs/:id/files/...</code>, and <code>GET /api/runs/:id/results</code> returns a normalized
+summary read from the engine's <code>summary.json</code>.</p>
+<p>Run folders live under <code>webui/runs/</code> (gitignored).</p>
+<p><strong>Modes</strong> (from the UI dropdown): <code>full</code> (screening + AI), <code>text-only</code> (no AI),
+<code>screening-only</code> (no AI). The two no-AI modes are cheap and good for smoke tests.</p>
+<h2 id="the-one-seam-that-keeps-it-path-agnostic">The one seam that keeps it path-agnostic</h2>
+<p><code>public/api.js</code> is the <strong>only</strong> place the UI talks to a backend. Everything is async
+and job-shaped: <code>submit -> jobId -> poll status -> results</code>. The engine is invoked as
+a child process today; swapping that for a cloud API + queue means changing only
+<code>server.js</code> (and wiring <code>attachAuth</code> in <code>api.js</code> for team/cloud auth). <strong>No UI code
+changes.</strong></p>
+<h2 id="design-rules-dont-break-these--theyre-what-make-it-fit-both-paths">Design rules (don't break these — they're what make it fit both paths)</h2>
+<ul>
+<li>Backend only via the HTTP API; never assume local filesystem access from the UI.</li>
+<li>Runs are always async jobs (no synchronous "run and wait").</li>
+<li>Artifacts addressed by URL, not local path (disk today, object storage tomorrow).</li>
+<li>Keep an auth seam (<code>attachAuth</code>), a no-op locally.</li>
+<li>UI stays a static bundle any host can serve (this server / Tauri / a CDN).</li>
+</ul></div>

@@ -30,3 +30,9 @@ clm-out*/
 
 # htmls that get created around .md files
 /*.html
+
+# stray large export
+20260914172856_usta-foundation-source-to-eds-mapping.csv.zip
+
+# webui per-job run workspace
+webui/runs/

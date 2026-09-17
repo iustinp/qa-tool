@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Page Pair Diff</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      Page&nbsp;Pair&nbsp;Diff
+    </div>
+    <div class="mode-badge" id="modeBadge" title="Backend mode">checking…</div>
+  </header>
+
+  <main class="layout">
+    <!-- New run -->
+    <section class="panel" aria-labelledby="newRunTitle">
+      <h2 id="newRunTitle">New run</h2>
+      <label class="field">
+        <span>Label <em>(optional)</em></span>
+        <input id="labelInput" type="text" placeholder="e.g. usta-foundation" />
+      </label>
+      <label class="field">
+        <span>
+          Pairs — one <code>source,target</code> per line
+          <button type="button" id="browseBtn" class="link-btn">Browse CSV…</button>
+          <input id="csvFile" type="file" accept=".csv,text/csv" hidden multiple />
+        </span>
+        <textarea id="pairsInput" rows="7"
+          placeholder="https://old.example.com/page,https://new.example.com/page"></textarea>
+      </label>
+      <label class="field">
+        <span>Mode</span>
+        <select id="modeSelect">
+          <option value="full">Full (screening + AI)</option>
+          <option value="text-only" selected>Text-only (no AI)</option>
+          <option value="screening-only">Screening-only (no AI)</option>
+        </select>
+      </label>
+      <div class="actions">
+        <button id="startBtn" class="primary">Start run</button>
+        <span id="startMsg" class="msg"></span>
+      </div>
+    </section>
+
+    <!-- Runs list -->
+    <section class="panel" aria-labelledby="runsTitle">
+      <div class="panel-head">
+        <h2 id="runsTitle">Runs</h2>
+        <button id="refreshBtn" class="ghost" title="Refresh">Refresh</button>
+      </div>
+      <div id="runsList" class="runs"></div>
+    </section>
+
+    <!-- Results (third column; hidden until a run is opened) -->
+    <section id="results" class="panel results-col" hidden aria-live="polite">
+      <div class="panel-head">
+        <h2 id="resultsTitle">Results</h2>
+        <button id="closeResults" class="ghost">Close</button>
+      </div>
+      <div id="resultsBody" class="drawer-body"></div>
+    </section>
+  </main>
+
+  <script src="/api.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
