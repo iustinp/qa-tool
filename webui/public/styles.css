@@ -40,13 +40,18 @@ body {
 
 .layout {
   display: grid;
-  grid-template-columns: 380px 1fr;
+  grid-template-columns: 360px minmax(320px, 1fr);
   gap: 20px;
   padding: 20px;
-  max-width: 1200px;
-  margin: 0 auto;
+  max-width: 1500px;
+  margin: 0; /* left-align so all columns get room instead of centering */
+  align-items: start;
 }
-@media (max-width: 820px) { .layout { grid-template-columns: 1fr; } }
+/* When results is open, become three columns so nothing overlaps. */
+.layout.show-results { grid-template-columns: 340px minmax(300px, 1fr) minmax(340px, 1.4fr); }
+@media (max-width: 1000px) {
+  .layout, .layout.show-results { grid-template-columns: 1fr; }
+}
 
 .panel {
   background: var(--panel);
@@ -100,14 +105,9 @@ button.ghost { background: transparent; }
 .bar { width: 90px; height: 6px; background: var(--border); border-radius: 999px; overflow: hidden; }
 .bar-fill { height: 100%; background: var(--accent); transition: width .4s ease; }
 
-.drawer {
-  position: fixed; top: 0; right: 0; height: 100vh; width: min(560px, 92vw);
-  background: var(--panel); border-left: 1px solid var(--border);
-  box-shadow: -20px 0 40px rgba(0,0,0,.4); display: flex; flex-direction: column;
-}
-.drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; border-bottom: 1px solid var(--border); }
-.drawer-head h2 { margin: 0; font-size: 15px; }
-.drawer-body { padding: 16px 18px; overflow: auto; }
+.results-col[hidden] { display: none; }
+.results-col .panel-head { margin-bottom: 12px; }
+.drawer-body { max-height: calc(100vh - 140px); overflow: auto; }
 .pair { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
 .thumb { width: 96px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); background: var(--panel-2); }
 .pair-info { flex: 1; min-width: 0; }

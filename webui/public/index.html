@@ -36,7 +36,7 @@
         <span>Mode</span>
         <select id="modeSelect">
           <option value="full">Full (screening + AI)</option>
-          <option value="text-only">Text-only (no AI)</option>
+          <option value="text-only" selected>Text-only (no AI)</option>
           <option value="screening-only">Screening-only (no AI)</option>
         </select>
       </label>
@@ -54,16 +54,16 @@
       </div>
       <div id="runsList" class="runs"></div>
     </section>
-  </main>
 
-  <!-- Results drawer -->
-  <aside id="results" class="drawer" hidden aria-live="polite">
-    <div class="drawer-head">
-      <h2 id="resultsTitle">Results</h2>
-      <button id="closeResults" class="ghost">Close</button>
-    </div>
-    <div id="resultsBody" class="drawer-body"></div>
-  </aside>
+    <!-- Results (third column; hidden until a run is opened) -->
+    <section id="results" class="panel results-col" hidden aria-live="polite">
+      <div class="panel-head">
+        <h2 id="resultsTitle">Results</h2>
+        <button id="closeResults" class="ghost">Close</button>
+      </div>
+      <div id="resultsBody" class="drawer-body"></div>
+    </section>
+  </main>
 
   <script src="/api.js"></script>
   <script src="/app.js"></script>

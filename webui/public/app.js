@@ -120,6 +120,7 @@
 
   async function openResults(jobId) {
     els.results.hidden = false;
+    document.querySelector('.layout').classList.add('show-results');
     els.resultsBody.innerHTML = '<p class="empty">Loading…</p>';
     try {
       const data = await API.getResults(jobId);
@@ -192,6 +193,7 @@
   els.refreshBtn.addEventListener('click', refreshRuns);
   els.closeResults.addEventListener('click', () => {
     els.results.hidden = true;
+    document.querySelector('.layout').classList.remove('show-results');
   });
 
   (async () => {
