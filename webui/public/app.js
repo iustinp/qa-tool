@@ -297,6 +297,10 @@
       els.ignoreTarget.value = (job.ignoreTarget || []).join('\n');
       els.clickSource.value = (job.clickSource || []).join('\n');
       els.clickTarget.value = (job.clickTarget || []).join('\n');
+      // Loaded settings are a snapshot of the run, not a live recipe binding —
+      // reset the picker to None to avoid implying they match a saved recipe.
+      els.recipeSelect.value = '';
+      els.deleteRecipeBtn.hidden = true;
       // Expand the ignore/click boxes that now hold selectors so they're visible.
       document.querySelectorAll('.ignore-box').forEach((box) => {
         box.open = [...box.querySelectorAll('textarea')].some((t) => t.value.trim());
