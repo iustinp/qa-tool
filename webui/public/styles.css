@@ -67,6 +67,11 @@ input, textarea {
 }
 input:focus, textarea:focus { outline: none; border-color: var(--accent); }
 
+select { width: 100%; background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; font: inherit; }
+select:focus { outline: none; border-color: var(--accent); }
+.link-btn { background: none; border: none; color: var(--accent); padding: 0 0 0 8px; font-size: 12px; cursor: pointer; }
+.link-btn:hover { text-decoration: underline; border: none; }
+
 .actions { display: flex; align-items: center; gap: 12px; }
 button {
   cursor: pointer; font: inherit; border-radius: 8px; padding: 8px 14px;
@@ -113,6 +118,11 @@ button.ghost { background: transparent; }
 .health.h0, .health.h1 { color: var(--err); }
 .health.h2, .health.h3 { color: var(--run); }
 .health.h4, .health.h5 { color: var(--ok); }
-.verdict { font-size: 12px; padding: 2px 8px; border-radius: 6px; }
+.verdict { font-size: 12px; padding: 2px 8px; border-radius: 6px; text-transform: capitalize; }
 .verdict.ok { color: var(--ok); }
 .verdict.review { color: var(--run); }
+.verdict.error { color: var(--err); }
+.note { font-size: 12px; color: var(--muted); }
+.report-links { display: flex; gap: 14px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.report-link { color: var(--accent); font-size: 13px; text-decoration: none; }
+.report-link:hover { text-decoration: underline; }

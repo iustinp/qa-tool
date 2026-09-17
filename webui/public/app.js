@@ -6,6 +6,9 @@
     modeBadge: $('#modeBadge'),
     label: $('#labelInput'),
     pairs: $('#pairsInput'),
+    modeSelect: $('#modeSelect'),
+    browseBtn: $('#browseBtn'),
+    csvFile: $('#csvFile'),
     startBtn: $('#startBtn'),
     startMsg: $('#startMsg'),
     refreshBtn: $('#refreshBtn'),
@@ -98,7 +101,11 @@
     }
     els.startBtn.disabled = true;
     try {
-      const { jobId } = await API.createRun({ label: els.label.value.trim(), csv });
+      const { jobId } = await API.createRun({
+        label: els.label.value.trim(),
+        csv,
+        mode: els.modeSelect.value,
+      });
       els.startMsg.textContent = `Started (${jobId.slice(0, 8)}…)`;
       els.pairs.value = '';
       els.label.value = '';
@@ -117,24 +124,34 @@
     try {
       const data = await API.getResults(jobId);
       els.resultsTitle.textContent = `Results — ${data.label || jobId.slice(0, 8)}`;
-      els.resultsBody.innerHTML = data.pairs
-        .map(
-          (p) => `
+      const reportLinks = [];
+      if (data.reportUrl)
+        reportLinks.push(`<a class="report-link" href="${data.reportUrl}" target="_blank">Open full report ↗</a>`);
+      if (data.customerReportUrl)
+        reportLinks.push(`<a class="report-link" href="${data.customerReportUrl}" target="_blank">Customer report ↗</a>`);
+      const header = reportLinks.length
+        ? `<div class="report-links">${reportLinks.join('')}</div>`
+        : '';
+      els.resultsBody.innerHTML =
+        header +
+        data.pairs
+          .map(
+            (p) => `
         <div class="pair">
-          <img class="thumb" src="${p.screenshot}" alt="pair ${p.index}" />
           <div class="pair-info">
             <div class="pair-urls">
               <div class="u"><span>src</span> ${escapeHtml(p.source)}</div>
               <div class="u"><span>tgt</span> ${escapeHtml(p.target)}</div>
             </div>
             <div class="pair-scores">
-              <span class="health h${Math.floor(p.health / 20)}">health ${p.health}</span>
-              <span class="verdict ${p.verdict}">${p.verdict}</span>
+              <span class="verdict ${p.status}">${p.status}</span>
+              <span class="note">${escapeHtml(p.note || '')}</span>
+              ${p.reviewUrl ? `<a class="report-link" href="${p.reviewUrl}" target="_blank">review ↗</a>` : ''}
             </div>
           </div>
         </div>`
-        )
-        .join('');
+          )
+          .join('');
     } catch (e) {
       els.resultsBody.innerHTML = `<p class="empty">${escapeHtml(e.message)}</p>`;
     }
@@ -145,6 +162,30 @@
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
     );
   }
+
+  // Browse: read chosen CSV file(s) client-side into the textarea.
+  // Works in any browser and stays path-agnostic (no server upload needed).
+  els.browseBtn.addEventListener('click', () => els.csvFile.click());
+  els.csvFile.addEventListener('change', async () => {
+    const files = [...els.csvFile.files];
+    if (!files.length) return;
+    try {
+      const texts = await Promise.all(files.map((f) => f.text()));
+      const merged = texts.join('\n').trim();
+      // If the label is empty and a single file was picked, seed it from the filename.
+      if (!els.label.value.trim() && files.length === 1) {
+        els.label.value = files[0].name.replace(/\.csv$/i, '');
+      }
+      els.pairs.value = els.pairs.value.trim()
+        ? `${els.pairs.value.trim()}\n${merged}`
+        : merged;
+      els.startMsg.textContent = `Loaded ${files.length} file(s).`;
+    } catch (e) {
+      els.startMsg.textContent = `Could not read file: ${e.message}`;
+    } finally {
+      els.csvFile.value = ''; // allow re-selecting the same file
+    }
+  });
 
   // Wire up
   els.startBtn.addEventListener('click', startRun);

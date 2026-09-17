@@ -38,8 +38,8 @@ const API = (() => {
 
   return {
     health: () => request('/api/health'),
-    createRun: ({ label, csv }) =>
-      request('/api/runs', { method: 'POST', body: JSON.stringify({ label, csv }) }),
+    createRun: ({ label, csv, mode }) =>
+      request('/api/runs', { method: 'POST', body: JSON.stringify({ label, csv, mode }) }),
     listRuns: () => request('/api/runs'),
     getRun: (jobId) => request(`/api/runs/${jobId}`),
     getResults: (jobId) => request(`/api/runs/${jobId}/results`),
