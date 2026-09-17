@@ -6,6 +6,12 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8756"],
       "port": 8756
+    },
+    {
+      "name": "webui",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["webui/server.js"],
+      "port": 4321
     }
   ]
 }

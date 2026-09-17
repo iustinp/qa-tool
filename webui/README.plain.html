@@ -1,0 +1,29 @@
+<div><h1 id="webui--temporary-dev-server--web-ui-stubbed-backend">webui — temporary dev server + web UI (STUBBED backend)</h1>
+<p>Work-in-progress web UI for <code>page-pair-diff</code>, built so it fits <strong>either</strong> eventual
+deployment path (self-hosted local/team server, or cloud). See the repo root
+<code>DEPLOYMENT-ARCHITECTURE.md</code> for the decision context.</p>
+<h2 id="run-it">Run it</h2>
+<pre><code class="language-bash">node webui/server.js
+# then open http://localhost:4321   (set WEBUI_PORT to change)
+</code></pre>
+<p>No dependencies — Node >= 18 only.</p>
+<h2 id="whats-real-vs-stubbed">What's real vs. stubbed</h2>
+<ul>
+<li><strong>Real:</strong> the web UI, and the job-shaped HTTP API <em>contract</em> the UI depends on
+(<code>POST /api/runs</code>, <code>GET /api/runs</code>, <code>GET /api/runs/:id</code>, <code>GET /api/runs/:id/results</code>).</li>
+<li><strong>Stubbed:</strong> the server fakes runs in memory and advances them on a timer; results
+and screenshots are canned. Nothing calls the real engine yet.</li>
+</ul>
+<h2 id="the-one-seam-that-keeps-it-path-agnostic">The one seam that keeps it path-agnostic</h2>
+<p><code>public/api.js</code> is the <strong>only</strong> place the UI talks to a backend. Everything is async
+and job-shaped: <code>submit -> jobId -> poll status -> results</code>. To go live, replace the
+stub handlers in <code>server.js</code> with real ones that call the engine's <code>runJob(config)</code>
+(and wire <code>attachAuth</code> in <code>api.js</code> for team/cloud auth). <strong>No UI code changes.</strong></p>
+<h2 id="design-rules-dont-break-these--theyre-what-make-it-fit-both-paths">Design rules (don't break these — they're what make it fit both paths)</h2>
+<ul>
+<li>Backend only via the HTTP API; never assume local filesystem access from the UI.</li>
+<li>Runs are always async jobs (no synchronous "run and wait").</li>
+<li>Artifacts addressed by URL, not local path (disk today, object storage tomorrow).</li>
+<li>Keep an auth seam (<code>attachAuth</code>), a no-op locally.</li>
+<li>UI stays a static bundle any host can serve (this server / Tauri / a CDN).</li>
+</ul></div>
