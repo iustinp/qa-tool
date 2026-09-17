@@ -115,6 +115,8 @@ button.ghost { background: transparent; }
 .err-count { color: var(--err); }
 .run-main { min-width: 0; }
 .run-side { display: flex; align-items: center; gap: 10px; min-width: 200px; justify-content: flex-end; }
+.run-actions { display: flex; gap: 6px; }
+.run-actions button { padding: 6px 10px; font-size: 13px; }
 .status { font-size: 12px; padding: 2px 9px; border-radius: 999px; text-transform: capitalize; }
 .status.ok { background: rgba(63,185,80,.15); color: var(--ok); }
 .status.run { background: rgba(210,153,34,.15); color: var(--run); }

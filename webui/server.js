@@ -430,7 +430,8 @@ const server = http.createServer(async (req, res) => {
     if (runMatch && req.method === 'GET') {
       const job = jobs.get(runMatch[1]);
       if (!job) return sendJson(res, 404, { error: 'Run not found' });
-      const { pairs, runDir, outDir, logPath, pid, ...rest } = job;
+      // Single-run detail includes pairs so the UI can reload the run into the form.
+      const { runDir, outDir, logPath, pid, logTail, ...rest } = job;
       return sendJson(res, 200, rest);
     }
 

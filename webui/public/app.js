@@ -87,11 +87,14 @@
         <div class="run-side">
           <span class="status ${statusClass(r.status)}">${r.stage || r.status}</span>
           <div class="bar"><div class="bar-fill" style="width:${r.progress || 0}%"></div></div>
-          ${
-            r.status === 'done'
-              ? `<button class="ghost view-btn" data-id="${r.id}">View</button>`
-              : ''
-          }
+          <div class="run-actions">
+            <button class="ghost load-btn" data-id="${r.id}" title="Load this run's settings into the form">Load</button>
+            ${
+              r.status === 'done'
+                ? `<button class="ghost view-btn" data-id="${r.id}">View</button>`
+                : ''
+            }
+          </div>
         </div>
       </div>`
       )
@@ -106,6 +109,32 @@
     els.runsList.querySelectorAll('.view-btn').forEach((b) =>
       b.addEventListener('click', () => openResults(b.dataset.id))
     );
+    els.runsList.querySelectorAll('.load-btn').forEach((b) =>
+      b.addEventListener('click', () => loadRun(b.dataset.id))
+    );
+  }
+
+  // Load a run's settings back into the New-run form (overwrites current values).
+  async function loadRun(jobId) {
+    try {
+      const job = await API.getRun(jobId);
+      els.label.value = job.label || '';
+      els.pairs.value = (job.pairs || []).map((p) => `${p.source},${p.target}`).join('\n');
+      els.modeSelect.value = job.mode || 'text-only';
+      els.threads.value = job.threads || 1;
+      els.ignoreSource.value = (job.ignoreSource || []).join('\n');
+      els.ignoreTarget.value = (job.ignoreTarget || []).join('\n');
+      els.clickSource.value = (job.clickSource || []).join('\n');
+      els.clickTarget.value = (job.clickTarget || []).join('\n');
+      // Expand the ignore/click boxes that now hold selectors so they're visible.
+      document.querySelectorAll('.ignore-box').forEach((box) => {
+        box.open = [...box.querySelectorAll('textarea')].some((t) => t.value.trim());
+      });
+      els.startMsg.textContent = `Loaded settings from "${job.label || jobId.slice(0, 8)}"`;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (e) {
+      els.startMsg.textContent = `Load failed: ${e.message}`;
+    }
   }
 
   function startPolling(jobId) {
