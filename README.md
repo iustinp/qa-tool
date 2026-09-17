@@ -91,6 +91,7 @@ Open `pairs/<slug>/layout-review.html` from a run to inspect the source↔target
 | `--layout-ocr` / `--no-layout-ocr` | off | Derive text geometry by OCR of the screenshots (needs the `tesseract` binary). |
 | `--cache` / `--no-cache` | off | Reuse vision segment/match results for identical inputs (`PPD_CACHE=1` also enables). |
 | `--recipe <file>` | none | Per-site YAML: ignore/click selectors, resolutions, mask/normalize, profiles. See [Site recipes](#site-recipes). |
+| `--resolutions <list>` | none | Analyze at several widths, e.g. `1440,768m,375m` (trailing `m` = mobile UA). Overrides the recipe's. See [Multi-resolution](#multi-resolution). |
 | `--probe-bedrock` | — | One auth check call; exits 0 if credentials work. |
 | `--help`, `-h` | — | Full option + environment reference. |
 
