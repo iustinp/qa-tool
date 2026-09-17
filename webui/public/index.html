@@ -87,6 +87,15 @@
         </label>
       </details>
 
+      <details class="ignore-box">
+        <summary>Resolutions (widths)</summary>
+        <p class="hint">Analyze at specific screen widths — empty means desktop only. <strong>mobile</strong>
+          sends a phone user-agent + touch so the site serves its mobile content. Each resolution
+          becomes a tab in the reports.</p>
+        <div id="resList" class="res-list"></div>
+        <button type="button" id="addResBtn" class="link-btn">+ Add width</button>
+      </details>
+
       <div class="actions">
         <button id="startBtn" class="primary">Start run</button>
         <span id="startMsg" class="msg"></span>

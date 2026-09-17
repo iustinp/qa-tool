@@ -15,6 +15,8 @@
     ignoreTarget: $('#ignoreTarget'),
     clickSource: $('#clickSource'),
     clickTarget: $('#clickTarget'),
+    resList: $('#resList'),
+    addResBtn: $('#addResBtn'),
     browseBtn: $('#browseBtn'),
     csvFile: $('#csvFile'),
     startBtn: $('#startBtn'),
@@ -327,13 +329,16 @@
       els.ignoreTarget.value = (job.ignoreTarget || []).join('\n');
       els.clickSource.value = (job.clickSource || []).join('\n');
       els.clickTarget.value = (job.clickTarget || []).join('\n');
+      setResolutions(job.resolutions || []);
       // Loaded settings are a snapshot of the run, not a live recipe binding —
       // reset the picker to None to avoid implying they match a saved recipe.
       els.recipeSelect.value = '';
       els.deleteRecipeBtn.hidden = true;
-      // Expand the ignore/click boxes that now hold selectors so they're visible.
+      // Expand the ignore/click/resolutions boxes that now have content.
       document.querySelectorAll('.ignore-box').forEach((box) => {
-        box.open = [...box.querySelectorAll('textarea')].some((t) => t.value.trim());
+        box.open =
+          [...box.querySelectorAll('textarea')].some((t) => t.value.trim()) ||
+          box.querySelector('.res-row') != null;
       });
       els.startMsg.textContent = `Loaded settings from "${job.label || jobId.slice(0, 8)}"`;
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -380,6 +385,7 @@
         mode: els.modeSelect.value,
         threads: Math.max(1, parseInt(els.threads.value, 10) || 1),
         recipe: els.recipeSelect.value || null,
+        resolutions: collectResolutions(),
         ignoreSource: toLines(els.ignoreSource.value),
         ignoreTarget: toLines(els.ignoreTarget.value),
         clickSource: toLines(els.clickSource.value),
@@ -507,6 +513,31 @@
     }
   });
 
+  // --- Resolutions (widths) ---
+  function addResRow(width, ua) {
+    const row = document.createElement('div');
+    row.className = 'res-row';
+    row.innerHTML =
+      `<input type="number" class="res-w" min="100" max="4000" step="1" placeholder="1440" value="${width != null ? width : ''}" />` +
+      '<select class="res-ua"><option value="desktop">desktop</option><option value="mobile">mobile</option></select>' +
+      '<button type="button" class="link-btn res-del" title="Remove">✕</button>';
+    row.querySelector('.res-ua').value = ua === 'mobile' ? 'mobile' : 'desktop';
+    row.querySelector('.res-del').addEventListener('click', () => row.remove());
+    els.resList.appendChild(row);
+  }
+  function setResolutions(list) {
+    els.resList.innerHTML = '';
+    (Array.isArray(list) ? list : []).forEach((r) => addResRow(r.width, r.ua));
+  }
+  function collectResolutions() {
+    return [...els.resList.querySelectorAll('.res-row')]
+      .map((row) => ({
+        width: parseInt(row.querySelector('.res-w').value, 10),
+        ua: row.querySelector('.res-ua').value,
+      }))
+      .filter((r) => Number.isFinite(r.width) && r.width >= 100 && r.width <= 4000);
+  }
+
   // --- Site recipes ---
   let recipeCache = [];
   async function refreshRecipes() {
@@ -533,8 +564,11 @@
     els.clickTarget.value = (r.clickTarget || []).join('\n');
     if (r.mode) els.modeSelect.value = r.mode;
     if (r.threads) els.threads.value = r.threads;
+    setResolutions(r.resolutions || []);
     document.querySelectorAll('.ignore-box').forEach((box) => {
-      box.open = [...box.querySelectorAll('textarea')].some((t) => t.value.trim());
+      box.open =
+        [...box.querySelectorAll('textarea')].some((t) => t.value.trim()) ||
+        box.querySelector('.res-row') != null;
     });
     // Loading a recipe focuses the runs list on its site (if it has one).
     if (r.site) {
@@ -562,6 +596,7 @@
         mode: els.modeSelect.value,
         threads: Math.max(1, parseInt(els.threads.value, 10) || 1),
         site: currentSite(),
+        resolutions: collectResolutions(),
         ignoreSource: toLines(els.ignoreSource.value),
         ignoreTarget: toLines(els.ignoreTarget.value),
         clickSource: toLines(els.clickSource.value),
@@ -598,6 +633,7 @@
     [els.ignoreSource, els.ignoreTarget, els.clickSource, els.clickTarget].forEach((t) => {
       t.value = '';
     });
+    setResolutions([]);
     document.querySelectorAll('.ignore-box').forEach((box) => {
       box.open = false;
     });
@@ -616,6 +652,7 @@
   });
 
   // Wire up
+  els.addResBtn.addEventListener('click', () => addResRow('', 'desktop'));
   els.startBtn.addEventListener('click', startRun);
   els.refreshBtn.addEventListener('click', refreshRuns);
   // Delegated (survives run-list re-renders): a chip click opens its popover.
