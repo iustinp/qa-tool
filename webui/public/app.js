@@ -218,7 +218,7 @@
     if (!siteDropdownBuilt) buildSiteDropdown();
     const sites = sitesFromRuns();
     for (const s of [...siteFilter]) if (!sites.includes(s)) siteFilter.delete(s); // prune gone sites
-    els.siteFilter.style.display = sites.length < 2 ? 'none' : '';
+    els.siteFilter.style.display = sites.length ? '' : 'none'; // hide only when no run has a site
     updateTriggerLabel();
     const sig = sites.join('|');
     const panel = els.siteFilter.querySelector('#msPanel');

@@ -144,7 +144,15 @@ function loadPersistedJobs() {
     try {
       data = JSON.parse(fs.readFileSync(path.join(runDir, 'job.json'), 'utf8'));
     } catch {
-      continue; // no metadata (old run, or mid-write) — skip
+      // No job.json — a run from before persistence. Reconstruct what we can from
+      // its artifacts (summary.json + input.csv + recipe.yaml) so history isn't lost.
+      const recovered = reconstructJob(id, runDir);
+      if (recovered) {
+        jobs.set(recovered.id, recovered);
+        persistJob(recovered); // write a job.json so it's a normal restore next time
+        restored += 1;
+      }
+      continue;
     }
     const job = {
       ...data,
@@ -165,6 +173,53 @@ function loadPersistedJobs() {
     restored += 1;
   }
   if (restored) console.log(`[webui] restored ${restored} run(s) from disk`);
+}
+
+// Rebuild a run's metadata from its on-disk artifacts (for runs created before
+// job.json existed). Returns null if there's not enough to reconstruct.
+function reconstructJob(id, runDir) {
+  const outDir = path.join(runDir, 'out');
+  let summary;
+  try {
+    summary = JSON.parse(fs.readFileSync(path.join(outDir, 'summary.json'), 'utf8'));
+  } catch {
+    return null; // never completed — nothing meaningful to show
+  }
+  const rows = summary.results || [];
+  const pairs = rows.map((r) => ({ source: r.sourceUrl, target: r.targetUrl }));
+  const hosts = [...new Set(pairs.map((p) => hostOf(p.source)).filter(Boolean))];
+  const createdAt = summary.generatedAt ? Date.parse(summary.generatedAt) : Date.now();
+  const loadErrors = rows.filter((r) => r.captureError).length;
+  const job = {
+    id,
+    label: `restored · ${hosts[0] || 'run'}`,
+    mode: summary.textOnly ? 'text-only' : summary.screeningOnly ? 'screening-only' : 'full',
+    threads: summary.threads || 1,
+    recipe: null,
+    site: hosts[0] || null,
+    sites: hosts,
+    ignoreSource: [], ignoreTarget: [], clickSource: [], clickTarget: [],
+    status: 'done', stage: 'done', progress: 100,
+    pairCount: pairs.length, pairs,
+    createdAt, updatedAt: createdAt, error: null,
+    analyzed: rows.length - loadErrors, loadErrors,
+    resultsUrl: `/api/runs/${id}/results`,
+    reportUrl: `/api/runs/${id}/files/report.html`,
+    runDir, outDir, logPath: path.join(runDir, 'engine.log'), logTail: '',
+  };
+  // Recover the ignore/click config if the run kept a recipe.yaml.
+  try {
+    const rec = YAML.parse(fs.readFileSync(path.join(runDir, 'recipe.yaml'), 'utf8')) || {};
+    const sels = (l) =>
+      (Array.isArray(l) ? l : []).map((x) => (typeof x === 'string' ? x : x && x.selector)).filter(Boolean);
+    job.ignoreSource = sels(rec.ignoreSource);
+    job.ignoreTarget = sels(rec.ignoreTarget);
+    job.clickSource = sels(rec.clickSource);
+    job.clickTarget = sels(rec.clickTarget);
+  } catch {
+    /* no recipe for this run */
+  }
+  return job;
 }
 
 // Start queued jobs up to the concurrency cap.
