@@ -225,8 +225,8 @@
             ${
               p.sourceShot || p.targetShot
                 ? `<div class="shots">
-                     ${p.sourceShot ? `<a class="shot" href="${p.sourceShot}" target="_blank"><span>source</span><img loading="lazy" src="${p.sourceShot}" alt="source" /></a>` : ''}
-                     ${p.targetShot ? `<a class="shot" href="${p.targetShot}" target="_blank"><span>target</span><img loading="lazy" src="${p.targetShot}" alt="target" /></a>` : ''}
+                     ${p.sourceShot ? `<a class="shot" href="${p.sourceShotFull || p.sourceShot}" target="_blank"><span>source</span><img loading="lazy" src="${p.sourceShot}" alt="source" /></a>` : ''}
+                     ${p.targetShot ? `<a class="shot" href="${p.targetShotFull || p.targetShot}" target="_blank"><span>target</span><img loading="lazy" src="${p.targetShot}" alt="target" /></a>` : ''}
                    </div>`
                 : ''
             }

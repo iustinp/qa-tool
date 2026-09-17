@@ -19,7 +19,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
-const { randomUUID } = require('crypto');
+const { randomUUID, createHash } = require('crypto');
+const sharp = require('sharp'); // already a project dependency (used by the engine)
 
 const PORT = process.env.WEBUI_PORT ? Number(process.env.WEBUI_PORT) : 4321;
 const ENGINE_MODE = (process.env.WEBUI_ENGINE || 'real').toLowerCase(); // "real" | "stub"
@@ -247,10 +248,12 @@ function buildResults(job) {
   }
   const rows = (summary && summary.results) || [];
   const pairs = rows.map((r) => {
+    // Thumbnail (small, generated on demand) for the <img>; full PNG for the link.
+    const relOf = (side) => `pairs/${r.slug}/screenshots/${side}-full.png`;
+    const hasShot = (side) => r.slug && fileExists(job, relOf(side));
     const shot = (side) =>
-      r.slug && fileExists(job, `pairs/${r.slug}/screenshots/${side}-full.png`)
-        ? reportRelUrl(job, `pairs/${r.slug}/screenshots/${side}-full.png`)
-        : null;
+      hasShot(side) ? `/api/runs/${job.id}/thumb/${relOf(side)}` : null;
+    const shotFull = (side) => (hasShot(side) ? reportRelUrl(job, relOf(side)) : null);
     // Per-pair: report whether it loaded/analyzed. Detailed quality (missing,
     // coverage, layout) lives in the per-pair review — a single aggregate number
     // here would be misleading across a large run.
@@ -262,6 +265,8 @@ function buildResults(job) {
       reviewUrl: r.slug ? reportRelUrl(job, `pairs/${r.slug}/layout-review.html`) : null,
       sourceShot: shot('source'),
       targetShot: shot('target'),
+      sourceShotFull: shotFull('source'),
+      targetShotFull: shotFull('target'),
     };
   });
   return {
@@ -287,6 +292,31 @@ function summarizeRun(outDir) {
     return { analyzed: rows.length - loadErrors, loadErrors };
   } catch {
     return { analyzed: null, loadErrors: null };
+  }
+}
+
+// Generate (once) and serve a small top-crop JPEG thumbnail of a run screenshot.
+// Full-page shots are very tall; a ~360px-wide top crop is a light glance, and the
+// full image is one click away. Cached under the run's thumbs/ dir.
+async function serveThumb(res, job, rel) {
+  const clean = decodeURIComponent(rel).replace(/^\/+/, '');
+  const srcPath = path.join(job.outDir, clean);
+  if (!srcPath.startsWith(job.outDir)) return void (res.writeHead(403), res.end('Forbidden'));
+  const cachePath = path.join(job.runDir, 'thumbs', `${createHash('sha1').update(clean).digest('hex')}.jpg`);
+  try {
+    if (!fs.existsSync(cachePath)) {
+      if (!fs.existsSync(srcPath)) return void (res.writeHead(404), res.end('Not found'));
+      fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+      await sharp(srcPath)
+        .resize(360, 480, { fit: 'cover', position: 'top' })
+        .jpeg({ quality: 72 })
+        .toFile(cachePath);
+    }
+    res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'max-age=86400' });
+    fs.createReadStream(cachePath).pipe(res);
+  } catch (e) {
+    res.writeHead(500);
+    res.end(String((e && e.message) || e));
   }
 }
 
@@ -443,6 +473,15 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 409, { error: 'Run not finished', status: job.status });
       }
       return sendJson(res, 200, buildResults(job));
+    }
+
+    // Serve a small cached thumbnail of a run screenshot (keeps the results panel
+    // light — the full-size PNGs are 1-2MB each and janked the page).
+    const thumbMatch = pathname.match(/^\/api\/runs\/([^/]+)\/thumb\/(.*)$/);
+    if (thumbMatch && req.method === 'GET') {
+      const job = jobs.get(thumbMatch[1]);
+      if (!job || !job.outDir) return void (res.writeHead(404), res.end('Not found'));
+      return void serveThumb(res, job, thumbMatch[2]);
     }
 
     // Serve a real run folder's artifacts (report.html, per-pair review, screenshots).
