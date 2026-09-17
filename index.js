@@ -50,8 +50,7 @@ function textAuditSummaryFields(report) {
   };
 }
 
-function layoutAuditSummaryFields(report) {
-  const l = report.layoutAudit;
+function layoutFields(l) {
   return {
     layoutStatus: l?.status ?? null,
     layoutMatchedCount: l?.matchedCount ?? null,
@@ -69,6 +68,19 @@ function layoutAuditSummaryFields(report) {
     driftYellow: l?.driftYellow ?? null,
     driftRed: l?.driftRed ?? null,
   };
+}
+
+function layoutAuditSummaryFields(report) {
+  return layoutFields(report.layoutAudit);
+}
+
+// Per-resolution layout fields keyed by profile name (null for single-resolution).
+function layoutByProfileFields(report) {
+  const map = report.layoutAuditByProfile;
+  if (!map || Object.keys(map).length < 2) return null;
+  const out = {};
+  for (const [name, l] of Object.entries(map)) out[name] = layoutFields(l);
+  return out;
 }
 
 function contentSummaryFields(report) {
@@ -552,6 +564,7 @@ async function main() {
           ...textAuditSummaryFields(r),
           ...contentSummaryFields(r),
           ...layoutAuditSummaryFields(r),
+          layoutByProfile: layoutByProfileFields(r),
         })),
       },
       null,
@@ -561,6 +574,17 @@ async function main() {
 
   console.log(`\nWrote ${summaryJson}`);
 
+  // The resolutions this run analyzed (in order) — drives the report tabs. Null
+  // when there's a single resolution (reports render exactly as before).
+  const resolutionsMeta = resolutionProfiles.length
+    ? resolutionProfiles.map((p) => ({
+        name: p.name,
+        width: p.width,
+        ua: p.ua,
+        label: `${p.width}${p.ua === 'mobile' ? ' · mobile' : ''}`,
+      }))
+    : null;
+
   // Sortable HTML report of every pair + its health scores/components.
   const reportRows = results.map((r) => ({
     slug: r.slug,
@@ -569,15 +593,18 @@ async function main() {
     captureError: r.captureError,
     finishedReason: r.finishedReason,
     ...layoutAuditSummaryFields(r),
+    byProfile: layoutByProfileFields(r), // per-resolution scores for the report tabs
   }));
   const reportPath = writeScoreReport(outDir, reportRows, {
     pairCount: results.length,
     generatedAt: new Date().toISOString(),
+    resolutions: resolutionsMeta,
   });
   console.log(`Wrote ${reportPath}`);
   const customerReportPath = writeCustomerReport(outDir, reportRows, {
     pairCount: results.length,
     generatedAt: new Date().toISOString(),
+    resolutions: resolutionsMeta,
   });
   console.log(`Wrote ${customerReportPath}`);
 
