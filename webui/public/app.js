@@ -269,6 +269,30 @@
     }
   });
 
+  // Clicking the "New run" header clears the whole form back to defaults.
+  function clearForm() {
+    els.label.value = '';
+    els.pairs.value = '';
+    els.modeSelect.value = 'text-only';
+    els.threads.value = 1;
+    [els.ignoreSource, els.ignoreTarget, els.clickSource, els.clickTarget].forEach((t) => {
+      t.value = '';
+    });
+    document.querySelectorAll('.ignore-box').forEach((box) => {
+      box.open = false;
+    });
+    els.startMsg.textContent = '';
+    els.label.focus();
+  }
+  const newRunTitle = $('#newRunTitle');
+  newRunTitle.addEventListener('click', clearForm);
+  newRunTitle.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      clearForm();
+    }
+  });
+
   // Wire up
   els.startBtn.addEventListener('click', startRun);
   els.refreshBtn.addEventListener('click', refreshRuns);

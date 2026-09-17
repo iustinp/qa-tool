@@ -60,6 +60,15 @@ body {
   padding: 18px;
 }
 .panel h2 { margin: 0 0 14px; font-size: 15px; }
+/* "New run" header doubles as a clear-the-form button. */
+#newRunTitle {
+  display: inline-block; cursor: pointer; user-select: none;
+  border: 1px solid transparent; border-radius: 8px; padding: 3px 9px; margin: -3px -9px 12px;
+  transition: border-color .15s ease, background .15s ease;
+}
+#newRunTitle:hover, #newRunTitle:focus-visible { border-color: var(--border); background: var(--panel-2); outline: none; }
+#newRunTitle::after { content: " ⌫"; color: var(--muted); font-size: 13px; opacity: 0; transition: opacity .15s ease; }
+#newRunTitle:hover::after, #newRunTitle:focus-visible::after { opacity: 1; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; }
 
 .field { display: block; margin-bottom: 14px; }
