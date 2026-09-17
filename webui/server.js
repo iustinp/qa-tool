@@ -21,8 +21,13 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { randomUUID, createHash } = require('crypto');
 const sharp = require('sharp'); // already a project dependency (used by the engine)
+const YAML = require('yaml'); // already a project dependency (used by lib/recipe.js)
 
-const PORT = process.env.WEBUI_PORT ? Number(process.env.WEBUI_PORT) : 4321;
+const CLI_PORT = (() => {
+  const i = process.argv.indexOf('--port');
+  return i >= 0 && process.argv[i + 1] ? Number(process.argv[i + 1]) : null;
+})();
+const PORT = CLI_PORT || (process.env.WEBUI_PORT ? Number(process.env.WEBUI_PORT) : 4321);
 const ENGINE_MODE = (process.env.WEBUI_ENGINE || 'real').toLowerCase(); // "real" | "stub"
 const MAX_CONCURRENT = process.env.WEBUI_MAX_CONCURRENT
   ? Math.max(1, Number(process.env.WEBUI_MAX_CONCURRENT))
@@ -32,8 +37,12 @@ const PROJECT_ROOT = path.join(__dirname, '..');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const SAMPLE_RESULTS = path.join(__dirname, 'sample-results');
 const RUNS_DIR = path.join(__dirname, 'runs'); // per-job workspace (gitignored)
+// Saved site recipes live at the project root (git-tracked, shareable, and
+// usable directly by the engine via --recipe).
+const RECIPES_DIR = path.join(PROJECT_ROOT, 'recipes');
 
 fs.mkdirSync(RUNS_DIR, { recursive: true });
+fs.mkdirSync(RECIPES_DIR, { recursive: true });
 
 // Modes the UI can request; each maps to an engine flag (or none = full run).
 const RUN_MODES = {
@@ -49,14 +58,30 @@ const jobs = new Map();
 const queue = [];
 let runningCount = 0;
 
-function createJob({ label, pairs, mode, threads, ignoreSource, ignoreTarget, clickSource, clickTarget }) {
+function hostOf(u) {
+  try {
+    return new URL(u).host;
+  } catch {
+    return null;
+  }
+}
+
+function createJob({
+  label, pairs, mode, threads, recipe, ignoreSource, ignoreTarget, clickSource, clickTarget,
+}) {
   const id = randomUUID();
   const now = Date.now();
+  // A run's site is intrinsic — the source host of its pairs (all pairs normally
+  // share one). It's what the runs filter groups by, independent of any recipe.
+  const hosts = [...new Set(pairs.map((p) => hostOf(p.source)).filter(Boolean))];
   const job = {
     id,
     label: label || `run-${new Date(now).toISOString().slice(0, 19)}`,
     mode: RUN_MODES[mode] ? mode : 'full',
     threads: Math.min(16, Math.max(1, Number(threads) || 1)),
+    recipe: recipe || null, // name of the site recipe it was run with (provenance)
+    site: hosts.length === 1 ? hosts[0] : hosts[0] || null, // grouping key
+    sites: hosts, // all distinct source hosts (usually one)
     ignoreSource: ignoreSource || [],
     ignoreTarget: ignoreTarget || [],
     clickSource: clickSource || [],
@@ -73,6 +98,7 @@ function createJob({ label, pairs, mode, threads, ignoreSource, ignoreTarget, cl
     logTail: '',
   };
   jobs.set(id, job);
+  persistJob(job);
   queue.push(id);
   pump();
   return job;
@@ -80,6 +106,120 @@ function createJob({ label, pairs, mode, threads, ignoreSource, ignoreTarget, cl
 
 function touch(job, patch) {
   Object.assign(job, patch, { updatedAt: Date.now() });
+}
+
+// --- Run persistence: survive server restarts ---------------------------------
+// Runs are kept in memory for liveness but mirrored to <runDir>/job.json so the
+// history (and the Load button) survive a restart. Ephemeral fields (paths, the
+// child pid, the log tail) are not stored — they're recomputed on load.
+const PERSIST_FIELDS = [
+  'id', 'label', 'mode', 'threads', 'recipe', 'site', 'sites',
+  'ignoreSource', 'ignoreTarget', 'clickSource', 'clickTarget',
+  'status', 'stage', 'progress', 'pairCount', 'pairs',
+  'createdAt', 'updatedAt', 'error', 'resultsUrl', 'reportUrl', 'analyzed', 'loadErrors',
+];
+
+function persistJob(job) {
+  try {
+    fs.mkdirSync(job.runDir, { recursive: true });
+    const data = {};
+    for (const k of PERSIST_FIELDS) if (job[k] !== undefined) data[k] = job[k];
+    fs.writeFileSync(path.join(job.runDir, 'job.json'), JSON.stringify(data));
+  } catch {
+    /* persistence is best-effort — never break a run over it */
+  }
+}
+
+function loadPersistedJobs() {
+  let ids = [];
+  try {
+    ids = fs.readdirSync(RUNS_DIR);
+  } catch {
+    return;
+  }
+  let restored = 0;
+  for (const id of ids) {
+    const runDir = path.join(RUNS_DIR, id);
+    let data;
+    try {
+      data = JSON.parse(fs.readFileSync(path.join(runDir, 'job.json'), 'utf8'));
+    } catch {
+      // No job.json — a run from before persistence. Reconstruct what we can from
+      // its artifacts (summary.json + input.csv + recipe.yaml) so history isn't lost.
+      const recovered = reconstructJob(id, runDir);
+      if (recovered) {
+        jobs.set(recovered.id, recovered);
+        persistJob(recovered); // write a job.json so it's a normal restore next time
+        restored += 1;
+      }
+      continue;
+    }
+    const job = {
+      ...data,
+      runDir,
+      outDir: path.join(runDir, 'out'),
+      logPath: path.join(runDir, 'engine.log'),
+      logTail: '',
+    };
+    // A run mid-flight when the server stopped can't resume — mark it interrupted.
+    if (job.status !== 'done' && job.status !== 'error') {
+      Object.assign(job, {
+        status: 'error',
+        stage: 'interrupted',
+        error: 'Interrupted by a server restart.',
+      });
+    }
+    jobs.set(job.id, job);
+    restored += 1;
+  }
+  if (restored) console.log(`[webui] restored ${restored} run(s) from disk`);
+}
+
+// Rebuild a run's metadata from its on-disk artifacts (for runs created before
+// job.json existed). Returns null if there's not enough to reconstruct.
+function reconstructJob(id, runDir) {
+  const outDir = path.join(runDir, 'out');
+  let summary;
+  try {
+    summary = JSON.parse(fs.readFileSync(path.join(outDir, 'summary.json'), 'utf8'));
+  } catch {
+    return null; // never completed — nothing meaningful to show
+  }
+  const rows = summary.results || [];
+  const pairs = rows.map((r) => ({ source: r.sourceUrl, target: r.targetUrl }));
+  const hosts = [...new Set(pairs.map((p) => hostOf(p.source)).filter(Boolean))];
+  const createdAt = summary.generatedAt ? Date.parse(summary.generatedAt) : Date.now();
+  const loadErrors = rows.filter((r) => r.captureError).length;
+  const job = {
+    id,
+    label: `restored · ${hosts[0] || 'run'}`,
+    mode: summary.textOnly ? 'text-only' : summary.screeningOnly ? 'screening-only' : 'full',
+    threads: summary.threads || 1,
+    recipe: null,
+    site: hosts[0] || null,
+    sites: hosts,
+    ignoreSource: [], ignoreTarget: [], clickSource: [], clickTarget: [],
+    status: 'done', stage: 'done', progress: 100,
+    pairCount: pairs.length, pairs,
+    createdAt, updatedAt: createdAt, error: null,
+    analyzed: rows.length - loadErrors, loadErrors,
+    resultsUrl: `/api/runs/${id}/results`,
+    reportUrl: `/api/runs/${id}/files/report.html`,
+    runDir, outDir, logPath: path.join(runDir, 'engine.log'), logTail: '',
+  };
+  // Recover the ignore/click config if the run kept a recipe.yaml.
+  try {
+    const rec = YAML.parse(fs.readFileSync(path.join(runDir, 'recipe.yaml'), 'utf8')) || {};
+    const sels = (l) =>
+      (Array.isArray(l) ? l : []).map((x) => (typeof x === 'string' ? x : x && x.selector)).filter(Boolean);
+    job.ignoreSource = sels(rec.ignoreSource);
+    job.ignoreTarget = sels(rec.ignoreTarget);
+    job.clickSource = sels(rec.clickSource);
+    job.clickTarget = sels(rec.clickTarget);
+  } catch {
+    /* no recipe for this run */
+  }
+  return job;
 }
 
 // Start queued jobs up to the concurrency cap.
@@ -94,6 +234,7 @@ function pump() {
       .then(() => runner(job))
       .catch((err) => touch(job, { status: 'error', stage: 'error', error: String(err) }))
       .finally(() => {
+        persistJob(job); // record the terminal state (done/error + analyzed/urls)
         runningCount -= 1;
         pump();
       });
@@ -137,6 +278,10 @@ function runReal(job) {
 
     const child = spawn(process.execPath, args, { cwd: PROJECT_ROOT });
     job.pid = child.pid;
+    job.child = child; // kept so a delete can stop a running run
+    child.on('close', () => {
+      job.child = null;
+    });
 
     let buf = '';
     const onChunk = (data) => {
@@ -369,6 +514,72 @@ function parseSelectors(input) {
   const list = Array.isArray(input) ? input : String(input || '').split(/\r?\n/);
   return list.map((s) => String(s).trim()).filter(Boolean);
 }
+
+// --- Named site recipes (git-tracked YAML in RECIPES_DIR) ----------------------
+function safeRecipeName(name) {
+  return String(name || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '')
+    .slice(0, 60);
+}
+// Flatten a recipe's selector rules (or bare strings) to plain selector strings
+// for the form, and surface the optional UI hints (mode/threads).
+function recipeToForm(name, doc) {
+  const sels = (list) =>
+    (Array.isArray(list) ? list : [])
+      .map((r) => (typeof r === 'string' ? r : r && r.selector))
+      .filter((s) => typeof s === 'string' && s.trim());
+  return {
+    name,
+    mode: doc.mode || null,
+    threads: doc.threads || null,
+    site: doc.site || null, // site this recipe is for (drives the runs filter)
+    ignoreSource: sels(doc.ignoreSource),
+    ignoreTarget: sels(doc.ignoreTarget),
+    clickSource: sels(doc.clickSource),
+    clickTarget: sels(doc.clickTarget),
+  };
+}
+function listRecipes() {
+  let files = [];
+  try {
+    files = fs.readdirSync(RECIPES_DIR).filter((f) => /\.ya?ml$/i.test(f));
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const f of files) {
+    try {
+      const doc = YAML.parse(fs.readFileSync(path.join(RECIPES_DIR, f), 'utf8')) || {};
+      out.push(recipeToForm(f.replace(/\.ya?ml$/i, ''), doc));
+    } catch {
+      /* skip an unparseable recipe */
+    }
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+function saveRecipe(body) {
+  const name = safeRecipeName(body.name);
+  if (!name) throw new Error('Invalid recipe name');
+  const rules = (input) => parseSelectors(input).map((selector) => ({ selector, reason: 'ui' }));
+  const doc = {
+    ignoreSource: rules(body.ignoreSource),
+    ignoreTarget: rules(body.ignoreTarget),
+    clickSource: rules(body.clickSource),
+    clickTarget: rules(body.clickTarget),
+  };
+  if (body.mode) doc.mode = body.mode; // UI hints — the engine ignores unknown keys
+  if (body.threads) doc.threads = Math.min(16, Math.max(1, Number(body.threads) || 1));
+  if (body.site) doc.site = String(body.site).slice(0, 253);
+  fs.writeFileSync(path.join(RECIPES_DIR, `${name}.yaml`), YAML.stringify(doc));
+  return name;
+}
+function deleteRecipe(name) {
+  const safe = safeRecipeName(name);
+  const p = path.join(RECIPES_DIR, `${safe}.yaml`);
+  if (safe && p.startsWith(RECIPES_DIR) && fs.existsSync(p)) fs.unlinkSync(p);
+}
 // Parse a pasted/uploaded CSV of `source,target` (comma or semicolon), skip header.
 function parsePairs(csvText) {
   const pairs = [];
@@ -430,6 +641,25 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
+    // --- Saved site recipes ---
+    if (pathname === '/api/recipes' && req.method === 'GET') {
+      return sendJson(res, 200, { recipes: listRecipes() });
+    }
+    if (pathname === '/api/recipes' && req.method === 'POST') {
+      const body = await readBody(req);
+      try {
+        const name = saveRecipe(body);
+        return sendJson(res, 201, { name });
+      } catch (e) {
+        return sendJson(res, 400, { error: String(e.message || e) });
+      }
+    }
+    const recipeMatch = pathname.match(/^\/api\/recipes\/([^/]+)$/);
+    if (recipeMatch && req.method === 'DELETE') {
+      deleteRecipe(decodeURIComponent(recipeMatch[1]));
+      return sendJson(res, 200, { ok: true });
+    }
+
     if (pathname === '/api/runs' && req.method === 'POST') {
       const body = await readBody(req);
       const pairs = parsePairs(body.csv);
@@ -441,6 +671,7 @@ const server = http.createServer(async (req, res) => {
         pairs,
         mode: body.mode,
         threads: body.threads,
+        recipe: body.recipe || null,
         ignoreSource: parseSelectors(body.ignoreSource),
         ignoreTarget: parseSelectors(body.ignoreTarget),
         clickSource: parseSelectors(body.clickSource),
@@ -452,16 +683,34 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/api/runs' && req.method === 'GET') {
       const list = [...jobs.values()]
         .sort((a, b) => b.createdAt - a.createdAt)
-        .map(({ pairs, runDir, outDir, logPath, logTail, pid, ...rest }) => rest);
+        .map(({ pairs, runDir, outDir, logPath, logTail, pid, child, ...rest }) => rest);
       return sendJson(res, 200, { runs: list });
     }
 
     const runMatch = pathname.match(/^\/api\/runs\/([^/]+)$/);
+    if (runMatch && req.method === 'DELETE') {
+      const job = jobs.get(runMatch[1]);
+      if (!job) return sendJson(res, 404, { error: 'Run not found' });
+      try {
+        if (job.child) job.child.kill(); // stop a run in progress
+      } catch {
+        /* already gone */
+      }
+      jobs.delete(job.id); // a queued id left in the pump queue is skipped (jobs.get miss)
+      try {
+        if (job.runDir && job.runDir.startsWith(RUNS_DIR)) {
+          fs.rmSync(job.runDir, { recursive: true, force: true });
+        }
+      } catch {
+        /* best effort */
+      }
+      return sendJson(res, 200, { ok: true });
+    }
     if (runMatch && req.method === 'GET') {
       const job = jobs.get(runMatch[1]);
       if (!job) return sendJson(res, 404, { error: 'Run not found' });
       // Single-run detail includes pairs so the UI can reload the run into the form.
-      const { runDir, outDir, logPath, pid, logTail, ...rest } = job;
+      const { runDir, outDir, logPath, pid, logTail, child, ...rest } = job;
       return sendJson(res, 200, rest);
     }
 
@@ -507,6 +756,8 @@ const server = http.createServer(async (req, res) => {
     sendJson(res, 500, { error: String(err && err.message ? err.message : err) });
   }
 });
+
+loadPersistedJobs(); // restore run history from disk before accepting requests
 
 server.listen(PORT, () => {
   // eslint-disable-next-line no-console

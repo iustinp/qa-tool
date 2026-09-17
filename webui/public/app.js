@@ -8,6 +8,9 @@
     pairs: $('#pairsInput'),
     modeSelect: $('#modeSelect'),
     threads: $('#threadsInput'),
+    recipeSelect: $('#recipeSelect'),
+    saveRecipeBtn: $('#saveRecipeBtn'),
+    deleteRecipeBtn: $('#deleteRecipeBtn'),
     ignoreSource: $('#ignoreSource'),
     ignoreTarget: $('#ignoreTarget'),
     clickSource: $('#clickSource'),
@@ -17,6 +20,7 @@
     startBtn: $('#startBtn'),
     startMsg: $('#startMsg'),
     refreshBtn: $('#refreshBtn'),
+    siteFilter: $('#siteFilter'),
     runsList: $('#runsList'),
     results: $('#results'),
     resultsTitle: $('#resultsTitle'),
@@ -26,6 +30,32 @@
 
   // Jobs we are actively polling: jobId -> intervalId
   const polling = new Map();
+
+  // Multi-select site filter (empty set = show all). The full run set is cached so
+  // toggling the filter re-renders without refetching.
+  const siteFilter = new Set();
+  let allRuns = [];
+  const RUNS_PAGE = 10;
+  let runsLimit = RUNS_PAGE; // cap the visible run history; "Load more" grows it
+
+  function hostOf(u) {
+    try {
+      return new URL(u).host;
+    } catch {
+      return null;
+    }
+  }
+  // Source host of the first real pair in the pairs box (a run/recipe's site).
+  function currentSite() {
+    for (const line of els.pairs.value.split('\n')) {
+      const t = line.trim();
+      if (!t) continue;
+      const src = t.split(/[;,]/)[0].trim();
+      if (/^source/i.test(src)) continue;
+      return hostOf(src);
+    }
+    return null;
+  }
 
   function fmtTime(ts) {
     return new Date(ts).toLocaleString();
@@ -44,37 +74,184 @@
     const cnt = (a) => (Array.isArray(a) ? a.length : 0);
     const chips = [`<span class="chip">${escapeHtml(r.mode || 'full')}</span>`];
     if (r.threads > 1) chips.push(`<span class="chip">${r.threads} threads</span>`);
-    const titleFor = (label, s, t) => {
-      const parts = [];
-      if (cnt(s)) parts.push(`source:\n  ${s.join('\n  ')}`);
-      if (cnt(t)) parts.push(`target:\n  ${t.join('\n  ')}`);
-      return `${label}\n${parts.join('\n')}`;
+    if (r.recipe) chips.push(`<span class="chip">▦ ${escapeHtml(r.recipe)}</span>`);
+    // A click-to-open, copyable popover of the actual selectors (data on the chip).
+    const popLines = (s, t) => {
+      const lines = [];
+      if (cnt(s)) lines.push('source:', ...s.map((x) => `  ${x}`));
+      if (cnt(t)) lines.push('target:', ...t.map((x) => `  ${x}`));
+      return lines.join('\n');
     };
-    if (cnt(r.ignoreSource) || cnt(r.ignoreTarget)) {
-      chips.push(
-        `<span class="chip" title="${escapeHtml(titleFor('Ignored', r.ignoreSource, r.ignoreTarget))}">ignore ${cnt(r.ignoreSource)}/${cnt(r.ignoreTarget)}</span>`
-      );
-    }
-    if (cnt(r.clickSource) || cnt(r.clickTarget)) {
-      chips.push(
-        `<span class="chip" title="${escapeHtml(titleFor('Clicked', r.clickSource, r.clickTarget))}">click ${cnt(r.clickSource)}/${cnt(r.clickTarget)}</span>`
-      );
-    }
+    const popChip = (label, title, s, t) =>
+      `<span class="chip chip-pop" data-pop-title="${escapeHtml(title)}" data-pop-lines="${escapeHtml(popLines(s, t))}">${label} ${cnt(s)}/${cnt(t)}</span>`;
+    if (cnt(r.ignoreSource) || cnt(r.ignoreTarget))
+      chips.push(popChip('ignore', 'Ignored', r.ignoreSource, r.ignoreTarget));
+    if (cnt(r.clickSource) || cnt(r.clickTarget))
+      chips.push(popChip('click', 'Clicked', r.clickSource, r.clickTarget));
     return chips.join('');
   }
 
+  // Click-triggered, copyable popover for the ignore/click chips (replaces the
+  // slow, uncopyable native title tooltip). Closes on any outside click.
+  let openPop = null;
+  function closeChipPop() {
+    if (!openPop) return;
+    openPop.remove();
+    openPop = null;
+    document.removeEventListener('click', onOutsidePop, true);
+  }
+  function onOutsidePop(e) {
+    if (openPop && !openPop.contains(e.target)) closeChipPop();
+  }
+  function openChipPop(chip) {
+    closeChipPop();
+    const title = chip.dataset.popTitle || '';
+    const lines = (chip.dataset.popLines || '').split('\n');
+    const pop = document.createElement('div');
+    pop.className = 'chip-pop-panel';
+    pop.innerHTML =
+      `<div class="cp-title">${escapeHtml(title)}</div>` +
+      lines.map((l) => `<div class="cp-line">${escapeHtml(l)}</div>`).join('');
+    document.body.appendChild(pop);
+    const rect = chip.getBoundingClientRect();
+    const clientW = document.documentElement.clientWidth || window.innerWidth || 1200;
+    const minLeft = window.scrollX + 8;
+    const maxLeft = window.scrollX + clientW - pop.offsetWidth - 12;
+    const left = Math.max(minLeft, Math.min(rect.left + window.scrollX, Math.max(minLeft, maxLeft)));
+    pop.style.top = `${rect.bottom + window.scrollY + 4}px`;
+    pop.style.left = `${left}px`;
+    openPop = pop;
+    setTimeout(() => document.addEventListener('click', onOutsidePop, true), 0);
+  }
+
+  // --- Searchable multi-select site dropdown (scales to many sites) -----------
+  // Selected sites pin above a separator; the searchable list of the rest sits
+  // below, so you can keep searching and adding. Built once; only its lists and
+  // the trigger label update on refresh (never rebuilt, to survive 1.2s polling).
+  let siteDropdownBuilt = false;
+  let lastSitesSig = '';
+  const sitesFromRuns = () => [...new Set(allRuns.map((r) => r.site).filter(Boolean))].sort();
+
+  function buildSiteDropdown() {
+    els.siteFilter.innerHTML =
+      '<button type="button" class="ms-trigger" id="msTrigger">All sites ▾</button>' +
+      '<div class="ms-panel" id="msPanel" hidden>' +
+      '<input type="text" class="ms-search" id="msSearch" placeholder="Search sites…" autocomplete="off" />' +
+      '<div class="ms-selected" id="msSelected"></div>' +
+      '<hr class="ms-sep" id="msSep" />' +
+      '<div class="ms-options" id="msOptions"></div>' +
+      '</div>';
+    const panel = els.siteFilter.querySelector('#msPanel');
+    const search = els.siteFilter.querySelector('#msSearch');
+    els.siteFilter.querySelector('#msTrigger').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const willOpen = panel.hidden;
+      panel.hidden = !willOpen;
+      if (willOpen) {
+        search.value = '';
+        renderDropdownLists();
+        search.focus();
+      }
+    });
+    search.addEventListener('input', renderDropdownLists);
+    panel.addEventListener('click', (e) => e.stopPropagation());
+    document.addEventListener('click', () => {
+      panel.hidden = true;
+    });
+    siteDropdownBuilt = true;
+  }
+
+  function updateTriggerLabel() {
+    const trigger = els.siteFilter.querySelector('#msTrigger');
+    if (!trigger) return;
+    const n = siteFilter.size;
+    trigger.textContent = `${n === 0 ? 'All sites' : n === 1 ? [...siteFilter][0] : `${n} sites`} ▾`;
+  }
+
+  function renderDropdownLists() {
+    const selectedEl = els.siteFilter.querySelector('#msSelected');
+    const optionsEl = els.siteFilter.querySelector('#msOptions');
+    const search = els.siteFilter.querySelector('#msSearch');
+    if (!selectedEl || !optionsEl) return;
+    const q = (search.value || '').trim().toLowerCase();
+    const sites = sitesFromRuns();
+    const selected = [...siteFilter].filter((s) => sites.includes(s)).sort();
+    const options = sites.filter((s) => !siteFilter.has(s) && s.toLowerCase().includes(q));
+    const row = (s, on) =>
+      `<button type="button" class="ms-opt${on ? ' on' : ''}" data-site="${escapeHtml(s)}">` +
+      `<span class="ms-box">${on ? '✓' : ''}</span><span class="ms-name">${escapeHtml(s)}</span></button>`;
+    selectedEl.innerHTML = selected.length
+      ? selected.map((s) => row(s, true)).join('') +
+        '<button type="button" class="ms-clear" id="msClear">Clear all</button>'
+      : '<div class="ms-empty">Showing all sites</div>';
+    optionsEl.innerHTML = options.length
+      ? options.map((s) => row(s, false)).join('')
+      : '<div class="ms-empty">No matches</div>';
+    els.siteFilter.querySelectorAll('.ms-opt').forEach((b) =>
+      b.addEventListener('click', () => {
+        const s = b.dataset.site;
+        if (siteFilter.has(s)) siteFilter.delete(s);
+        else siteFilter.add(s);
+        runsLimit = RUNS_PAGE; // a new filter view starts from the top
+        renderDropdownLists();
+        updateTriggerLabel();
+        renderRunsList();
+        search.focus();
+      })
+    );
+    const clear = els.siteFilter.querySelector('#msClear');
+    if (clear)
+      clear.addEventListener('click', () => {
+        siteFilter.clear();
+        runsLimit = RUNS_PAGE;
+        renderDropdownLists();
+        updateTriggerLabel();
+        renderRunsList();
+        search.focus();
+      });
+  }
+
+  // Data/dropdown sync — runs on every refresh (incl. polling). Cheap: never
+  // rebuilds the dropdown; only prunes stale selections + updates label/lists.
   function renderRuns(runs) {
-    if (!runs.length) {
-      els.runsList.innerHTML = '<p class="empty">No runs yet. Start one above.</p>';
+    allRuns = runs;
+    if (!siteDropdownBuilt) buildSiteDropdown();
+    const sites = sitesFromRuns();
+    for (const s of [...siteFilter]) if (!sites.includes(s)) siteFilter.delete(s); // prune gone sites
+    els.siteFilter.style.display = sites.length ? '' : 'none'; // hide only when no run has a site
+    updateTriggerLabel();
+    const sig = sites.join('|');
+    const panel = els.siteFilter.querySelector('#msPanel');
+    if (panel && !panel.hidden && sig !== lastSitesSig) renderDropdownLists();
+    lastSitesSig = sig;
+    // Poll every non-terminal run regardless of the filter (background runs update).
+    runs.forEach((r) => {
+      if (r.status !== 'done' && r.status !== 'error' && !polling.has(r.id)) startPolling(r.id);
+    });
+    renderRunsList();
+  }
+
+  // Render just the run rows (respecting the active filter).
+  function renderRunsList() {
+    const shown = siteFilter.size
+      ? allRuns.filter((r) => r.site && siteFilter.has(r.site))
+      : allRuns;
+    if (!shown.length) {
+      els.runsList.innerHTML = allRuns.length
+        ? '<p class="empty">No runs for the selected site(s).</p>'
+        : '<p class="empty">No runs yet. Start one above.</p>';
       return;
     }
-    els.runsList.innerHTML = runs
-      .map(
-        (r) => `
+    const visible = shown.slice(0, runsLimit);
+    const hidden = shown.length - visible.length;
+    els.runsList.innerHTML =
+      visible
+        .map(
+          (r) => `
       <div class="run" data-id="${r.id}">
         <div class="run-main">
           <div class="run-label">${escapeHtml(r.label)}</div>
-          <div class="run-meta">${r.pairCount} pair(s) · ${fmtTime(r.createdAt)}</div>
+          <div class="run-meta">${r.site ? `${escapeHtml(r.site)} · ` : ''}${r.pairCount} pair(s) · ${fmtTime(r.createdAt)}</div>
           <div class="run-config">${runConfigChips(r)}</div>
           ${
             r.status === 'done' && (r.analyzed != null || r.loadErrors)
@@ -94,24 +271,48 @@
                 ? `<button class="ghost view-btn" data-id="${r.id}">View</button>`
                 : ''
             }
+            <button class="ghost del-btn" data-id="${r.id}" title="Delete this run (removes it from disk)">✕</button>
           </div>
         </div>
       </div>`
-      )
-      .join('');
+        )
+        .join('') +
+      (hidden > 0
+        ? `<button class="ghost load-more" id="loadMoreRuns">Load ${Math.min(RUNS_PAGE, hidden)} more · ${hidden} older hidden</button>`
+        : '');
 
-    // Keep polling any run that isn't finished.
-    runs.forEach((r) => {
-      if (r.status !== 'done' && r.status !== 'error' && !polling.has(r.id)) {
-        startPolling(r.id);
-      }
-    });
     els.runsList.querySelectorAll('.view-btn').forEach((b) =>
       b.addEventListener('click', () => openResults(b.dataset.id))
     );
     els.runsList.querySelectorAll('.load-btn').forEach((b) =>
       b.addEventListener('click', () => loadRun(b.dataset.id))
     );
+    els.runsList.querySelectorAll('.del-btn').forEach((b) =>
+      b.addEventListener('click', () => deleteRun(b.dataset.id))
+    );
+    const more = els.runsList.querySelector('#loadMoreRuns');
+    if (more)
+      more.addEventListener('click', () => {
+        runsLimit += RUNS_PAGE;
+        renderRunsList();
+      });
+  }
+
+  // Delete a run (from the list and from disk).
+  async function deleteRun(jobId) {
+    const run = allRuns.find((r) => r.id === jobId);
+    const name = run ? run.label : jobId.slice(0, 8);
+    if (!window.confirm(`Delete run "${name}"? This removes it from disk and can't be undone.`)) return;
+    try {
+      if (polling.has(jobId)) {
+        clearInterval(polling.get(jobId));
+        polling.delete(jobId);
+      }
+      await API.deleteRun(jobId);
+      await refreshRuns();
+    } catch (e) {
+      els.startMsg.textContent = `Delete failed: ${e.message}`;
+    }
   }
 
   // Load a run's settings back into the New-run form (overwrites current values).
@@ -126,6 +327,10 @@
       els.ignoreTarget.value = (job.ignoreTarget || []).join('\n');
       els.clickSource.value = (job.clickSource || []).join('\n');
       els.clickTarget.value = (job.clickTarget || []).join('\n');
+      // Loaded settings are a snapshot of the run, not a live recipe binding —
+      // reset the picker to None to avoid implying they match a saved recipe.
+      els.recipeSelect.value = '';
+      els.deleteRecipeBtn.hidden = true;
       // Expand the ignore/click boxes that now hold selectors so they're visible.
       document.querySelectorAll('.ignore-box').forEach((box) => {
         box.open = [...box.querySelectorAll('textarea')].some((t) => t.value.trim());
@@ -174,12 +379,17 @@
         csv,
         mode: els.modeSelect.value,
         threads: Math.max(1, parseInt(els.threads.value, 10) || 1),
+        recipe: els.recipeSelect.value || null,
         ignoreSource: toLines(els.ignoreSource.value),
         ignoreTarget: toLines(els.ignoreTarget.value),
         clickSource: toLines(els.clickSource.value),
         clickTarget: toLines(els.clickTarget.value),
       });
       els.startMsg.textContent = `Started (${jobId.slice(0, 8)}…)`;
+      // Reveal-on-start: make sure the just-started run's site is visible even if a
+      // different site filter was active. (Empty filter already shows everything.)
+      const site = currentSite();
+      if (site && siteFilter.size && !siteFilter.has(site)) siteFilter.add(site);
       // Keep the pairs, label, and ignore/click selectors in place so the run can
       // be tweaked and resubmitted without re-entering everything.
       await refreshRuns();
@@ -191,26 +401,48 @@
     }
   }
 
+  const PAIRS_PAGE = 20;
+  let resultsData = null;
+  let resultsPairsLimit = PAIRS_PAGE;
+
   async function openResults(jobId) {
     els.results.hidden = false;
     document.querySelector('.layout').classList.add('show-results');
     els.resultsBody.innerHTML = '<p class="empty">Loading…</p>';
     try {
-      const data = await API.getResults(jobId);
-      els.resultsTitle.textContent = `Results — ${data.label || jobId.slice(0, 8)}`;
-      const reportLinks = [];
-      if (data.reportUrl)
-        reportLinks.push(`<a class="report-link" href="${data.reportUrl}" target="_blank">Open full report ↗</a>`);
-      if (data.customerReportUrl)
-        reportLinks.push(`<a class="report-link" href="${data.customerReportUrl}" target="_blank">Customer report ↗</a>`);
-      const header = reportLinks.length
-        ? `<div class="report-links">${reportLinks.join('')}</div>`
+      resultsData = await API.getResults(jobId);
+      resultsPairsLimit = PAIRS_PAGE;
+      els.resultsTitle.textContent = `Results — ${resultsData.label || jobId.slice(0, 8)}`;
+      renderResultsPairs();
+    } catch (e) {
+      els.resultsBody.innerHTML = `<p class="empty">${escapeHtml(e.message)}</p>`;
+    }
+  }
+
+  // Render the results drawer, capping the number of pairs shown (a run can have
+  // thousands — the full set lives in the report behind "Open full report").
+  function renderResultsPairs() {
+    const data = resultsData;
+    if (!data) return;
+    const reportLinks = [];
+    if (data.reportUrl)
+      reportLinks.push(`<a class="report-link" href="${data.reportUrl}" target="_blank">Open full report ↗</a>`);
+    if (data.customerReportUrl)
+      reportLinks.push(`<a class="report-link" href="${data.customerReportUrl}" target="_blank">Customer report ↗</a>`);
+    const header = reportLinks.length ? `<div class="report-links">${reportLinks.join('')}</div>` : '';
+    const pairs = data.pairs || [];
+    const visible = pairs.slice(0, resultsPairsLimit);
+    const hidden = pairs.length - visible.length;
+    const countLine =
+      pairs.length > PAIRS_PAGE
+        ? `<div class="results-count">Showing ${visible.length} of ${pairs.length} pairs</div>`
         : '';
-      els.resultsBody.innerHTML =
-        header +
-        data.pairs
-          .map(
-            (p) => `
+    els.resultsBody.innerHTML =
+      header +
+      countLine +
+      visible
+        .map(
+          (p) => `
         <div class="pair">
           <div class="pair-info">
             <div class="pair-urls">
@@ -232,11 +464,17 @@
             }
           </div>
         </div>`
-          )
-          .join('');
-    } catch (e) {
-      els.resultsBody.innerHTML = `<p class="empty">${escapeHtml(e.message)}</p>`;
-    }
+        )
+        .join('') +
+      (hidden > 0
+        ? `<button class="ghost load-more" id="loadMorePairs">Load ${Math.min(PAIRS_PAGE, hidden)} more · ${hidden} not shown (full set in the report)</button>`
+        : '');
+    const more = els.resultsBody.querySelector('#loadMorePairs');
+    if (more)
+      more.addEventListener('click', () => {
+        resultsPairsLimit += PAIRS_PAGE;
+        renderResultsPairs();
+      });
   }
 
   function escapeHtml(s) {
@@ -269,6 +507,88 @@
     }
   });
 
+  // --- Site recipes ---
+  let recipeCache = [];
+  async function refreshRecipes() {
+    try {
+      const { recipes } = await API.listRecipes();
+      recipeCache = recipes || [];
+    } catch {
+      recipeCache = [];
+    }
+    const current = els.recipeSelect.value;
+    els.recipeSelect.innerHTML =
+      '<option value="">— none —</option>' +
+      recipeCache
+        .map((r) => `<option value="${escapeHtml(r.name)}">${escapeHtml(r.name)}</option>`)
+        .join('');
+    if (recipeCache.some((r) => r.name === current)) els.recipeSelect.value = current;
+    els.deleteRecipeBtn.hidden = !els.recipeSelect.value;
+  }
+  // Apply a recipe's saved settings to the ignore/click boxes (and mode/threads).
+  function applyRecipe(r) {
+    els.ignoreSource.value = (r.ignoreSource || []).join('\n');
+    els.ignoreTarget.value = (r.ignoreTarget || []).join('\n');
+    els.clickSource.value = (r.clickSource || []).join('\n');
+    els.clickTarget.value = (r.clickTarget || []).join('\n');
+    if (r.mode) els.modeSelect.value = r.mode;
+    if (r.threads) els.threads.value = r.threads;
+    document.querySelectorAll('.ignore-box').forEach((box) => {
+      box.open = [...box.querySelectorAll('textarea')].some((t) => t.value.trim());
+    });
+    // Loading a recipe focuses the runs list on its site (if it has one).
+    if (r.site) {
+      siteFilter.clear();
+      siteFilter.add(r.site);
+      renderRuns(allRuns);
+    }
+  }
+  els.recipeSelect.addEventListener('change', () => {
+    els.deleteRecipeBtn.hidden = !els.recipeSelect.value;
+    const r = recipeCache.find((x) => x.name === els.recipeSelect.value);
+    if (r) {
+      applyRecipe(r);
+      els.startMsg.textContent = `Loaded recipe "${r.name}"`;
+    }
+  });
+  els.saveRecipeBtn.addEventListener('click', async () => {
+    const suggested = els.recipeSelect.value || els.label.value.trim() || '';
+    const name = window.prompt('Save site recipe as:', suggested);
+    if (!name || !name.trim()) return;
+    try {
+      const toLines = (v) => v.split('\n').map((s) => s.trim()).filter(Boolean);
+      const { name: saved } = await API.saveRecipe({
+        name: name.trim(),
+        mode: els.modeSelect.value,
+        threads: Math.max(1, parseInt(els.threads.value, 10) || 1),
+        site: currentSite(),
+        ignoreSource: toLines(els.ignoreSource.value),
+        ignoreTarget: toLines(els.ignoreTarget.value),
+        clickSource: toLines(els.clickSource.value),
+        clickTarget: toLines(els.clickTarget.value),
+      });
+      await refreshRecipes();
+      els.recipeSelect.value = saved;
+      els.deleteRecipeBtn.hidden = false;
+      els.startMsg.textContent = `Saved recipe "${saved}"`;
+    } catch (e) {
+      els.startMsg.textContent = `Save recipe failed: ${e.message}`;
+    }
+  });
+  els.deleteRecipeBtn.addEventListener('click', async () => {
+    const name = els.recipeSelect.value;
+    if (!name || !window.confirm(`Delete recipe "${name}"?`)) return;
+    try {
+      await API.deleteRecipe(name);
+      await refreshRecipes();
+      els.recipeSelect.value = '';
+      els.deleteRecipeBtn.hidden = true;
+      els.startMsg.textContent = `Deleted recipe "${name}"`;
+    } catch (e) {
+      els.startMsg.textContent = `Delete failed: ${e.message}`;
+    }
+  });
+
   // Clicking the "New run" header clears the whole form back to defaults.
   function clearForm() {
     els.label.value = '';
@@ -281,6 +601,8 @@
     document.querySelectorAll('.ignore-box').forEach((box) => {
       box.open = false;
     });
+    els.recipeSelect.value = '';
+    els.deleteRecipeBtn.hidden = true;
     els.startMsg.textContent = '';
     els.label.focus();
   }
@@ -296,6 +618,17 @@
   // Wire up
   els.startBtn.addEventListener('click', startRun);
   els.refreshBtn.addEventListener('click', refreshRuns);
+  // Delegated (survives run-list re-renders): a chip click opens its popover.
+  els.runsList.addEventListener('click', (e) => {
+    const chip = e.target.closest('.chip-pop');
+    if (!chip) return;
+    e.stopPropagation();
+    if (openPop && openPop.dataset.forChip === chip.dataset.popLines) closeChipPop();
+    else {
+      openChipPop(chip);
+      if (openPop) openPop.dataset.forChip = chip.dataset.popLines;
+    }
+  });
   els.closeResults.addEventListener('click', () => {
     els.results.hidden = true;
     document.querySelector('.layout').classList.remove('show-results');
@@ -309,6 +642,6 @@
     } catch {
       els.modeBadge.textContent = 'offline';
     }
-    await refreshRuns();
+    await Promise.all([refreshRuns(), refreshRecipes()]);
   })();
 })();

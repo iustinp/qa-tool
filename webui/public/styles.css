@@ -43,8 +43,8 @@ body {
   grid-template-columns: 360px minmax(320px, 1fr);
   gap: 20px;
   padding: 20px;
-  max-width: 1500px;
-  margin: 0; /* left-align so all columns get room instead of centering */
+  max-width: none; /* use the full screen width */
+  margin: 0;
   align-items: start;
 }
 /* When results is open, become three columns so nothing overlaps. */
@@ -72,6 +72,9 @@ body {
 .panel-head { display: flex; align-items: center; justify-content: space-between; }
 
 .field { display: block; margin-bottom: 14px; }
+.recipe-bar { display: flex; gap: 8px; align-items: stretch; }
+.recipe-bar select { flex: 1; min-width: 0; }
+.recipe-bar button { white-space: nowrap; }
 .field-row { display: flex; gap: 12px; }
 .field-row .field { flex: 1; }
 .field-row .threads-field { flex: 0 0 90px; }
@@ -109,6 +112,33 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 button.ghost { background: transparent; }
 .msg { font-size: 12px; color: var(--muted); }
 
+.site-filter { position: relative; margin-bottom: 12px; }
+.ms-trigger {
+  width: 100%; text-align: left; background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; cursor: pointer; font: inherit;
+}
+.ms-trigger:hover { border-color: var(--accent); }
+.ms-panel {
+  position: absolute; z-index: 30; left: 0; right: 0; margin-top: 4px; padding: 8px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.45);
+}
+.ms-search { width: 100%; margin-bottom: 8px; }
+.ms-selected, .ms-options { display: flex; flex-direction: column; gap: 2px; }
+.ms-options { max-height: 260px; overflow-y: auto; }
+.ms-sep { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
+.ms-opt {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  background: transparent; border: 1px solid transparent; color: var(--text);
+  border-radius: 6px; padding: 5px 8px; cursor: pointer; font: inherit; font-size: 13px;
+}
+.ms-opt:hover { background: var(--panel-2); }
+.ms-opt.on { color: var(--accent); }
+.ms-box { width: 14px; flex: 0 0 14px; text-align: center; color: var(--accent); }
+.ms-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-empty { font-size: 12px; color: var(--muted); padding: 4px 8px; }
+.ms-clear { align-self: flex-start; background: none; border: none; color: var(--muted); font-size: 12px; cursor: pointer; padding: 4px 8px; }
+.ms-clear:hover { color: var(--accent); text-decoration: underline; border: none; }
 .runs { display: flex; flex-direction: column; gap: 10px; }
 .empty { color: var(--muted); font-size: 13px; }
 .run {
@@ -119,13 +149,25 @@ button.ghost { background: transparent; }
 .run-meta { font-size: 12px; color: var(--muted); }
 .run-config { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
 .chip { font-size: 11px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; cursor: default; }
-.chip[title] { cursor: help; }
+.chip-pop { cursor: pointer; }
+.chip-pop:hover { border-color: var(--accent); }
+.chip-pop-panel {
+  position: absolute; z-index: 60; max-width: 360px; padding: 8px 10px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.5); user-select: text;
+}
+.cp-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 5px; }
+.cp-line { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--text); white-space: pre; overflow-x: auto; }
 .run-stat { font-size: 12px; color: var(--muted); margin-top: 6px; }
 .err-count { color: var(--err); }
 .run-main { min-width: 0; }
 .run-side { display: flex; align-items: center; gap: 10px; min-width: 200px; justify-content: flex-end; }
 .run-actions { display: flex; gap: 6px; }
 .run-actions button { padding: 6px 10px; font-size: 13px; }
+.del-btn:hover { border-color: var(--err); color: var(--err); }
+.load-more { width: 100%; margin-top: 4px; color: var(--muted); font-size: 13px; }
+.load-more:hover { color: var(--accent); }
+.results-count { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
 .status { font-size: 12px; padding: 2px 9px; border-radius: 999px; text-transform: capitalize; }
 .status.ok { background: rgba(63,185,80,.15); color: var(--ok); }
 .status.run { background: rgba(210,153,34,.15); color: var(--run); }

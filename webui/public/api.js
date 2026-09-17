@@ -38,13 +38,19 @@ const API = (() => {
 
   return {
     health: () => request('/api/health'),
-    createRun: ({ label, csv, mode, threads, ignoreSource, ignoreTarget, clickSource, clickTarget }) =>
+    createRun: ({ label, csv, mode, threads, recipe, ignoreSource, ignoreTarget, clickSource, clickTarget }) =>
       request('/api/runs', {
         method: 'POST',
-        body: JSON.stringify({ label, csv, mode, threads, ignoreSource, ignoreTarget, clickSource, clickTarget }),
+        body: JSON.stringify({ label, csv, mode, threads, recipe, ignoreSource, ignoreTarget, clickSource, clickTarget }),
       }),
     listRuns: () => request('/api/runs'),
     getRun: (jobId) => request(`/api/runs/${jobId}`),
     getResults: (jobId) => request(`/api/runs/${jobId}/results`),
+    deleteRun: (jobId) => request(`/api/runs/${jobId}`, { method: 'DELETE' }),
+    listRecipes: () => request('/api/recipes'),
+    saveRecipe: (recipe) =>
+      request('/api/recipes', { method: 'POST', body: JSON.stringify(recipe) }),
+    deleteRecipe: (name) =>
+      request(`/api/recipes/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   };
 })();
