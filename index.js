@@ -94,6 +94,20 @@ function contentSummaryFields(report) {
   };
 }
 
+// Parse a --resolutions value like "1440,768m,375m": comma-separated widths, an
+// optional trailing "m" meaning the mobile user-agent (else desktop).
+function parseResolutionsArg(s) {
+  return String(s || '')
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .map((t) => {
+      const m = /^(\d+)(m)?$/i.exec(t);
+      return m ? { width: parseInt(m[1], 10), ua: m[2] ? 'mobile' : 'desktop' } : null;
+    })
+    .filter(Boolean);
+}
+
 function parseArgs(argv) {
   const out = {
     csv: null,
@@ -111,6 +125,7 @@ function parseArgs(argv) {
     layoutOcr: null, // null => env default (off); true via --layout-ocr
     layoutCanonical: null, // null => default on; false via --no-layout-canonical
     crawl: false, // opt-in one-hop interaction crawl (--crawl)
+    resolutions: null, // null => use the recipe's; else overrides it (--resolutions)
   };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
@@ -130,6 +145,8 @@ function parseArgs(argv) {
     else if (a === '--layout-canonical') out.layoutCanonical = true;
     else if (a === '--no-layout-canonical') out.layoutCanonical = false;
     else if (a === '--crawl') out.crawl = true;
+    else if (a.startsWith('--resolutions=')) out.resolutions = parseResolutionsArg(a.slice(14));
+    else if (a === '--resolutions') out.resolutions = parseResolutionsArg(argv[++i]);
     else if (a.startsWith('--csv=')) out.csv = a.slice(6);
     else if (a === '--csv') out.csv = argv[++i];
     else if (a.startsWith('--threads=')) out.threads = Math.max(1, parseInt(a.split('=')[1], 10) || 1);
@@ -195,9 +212,13 @@ CSV format (header optional; comma OR semicolon between the two URLs):
   https://example.com/original,https://example.com/migrated
   https://example.com/original;https://example.com/migrated   # ';' also works
 
-Optional per-site recipe (YAML) — see recipe.example.yaml and ROADMAP.md:
-  --recipe <file>          Load ignore/mask/normalize rules, capture profiles, interaction
-                             hints. Omitted => zero-config defaults (desktop profile only).
+Optional per-site recipe (YAML) — see recipe.example.yaml:
+  --recipe <file>          Load ignore/click selectors, resolutions, mask/normalize, capture
+                             profiles. Omitted => zero-config defaults (desktop profile only).
+
+Multi-resolution — analyze at several widths (overrides the recipe's resolutions):
+  --resolutions <list>     e.g. 1440,768m,375m  (comma-separated widths; trailing "m" = mobile
+                             user-agent + touch). Reports become tabbed by resolution.
 
 Vision result cache (content-addressed by prompt + image bytes; reuses segment/match
 results for identical inputs across pages and re-runs):
@@ -361,7 +382,9 @@ async function main() {
 
   // A recipe `resolutions` list (widths + UA) overrides the named profiles: the
   // pipeline runs once per resolution. Empty => today's single desktop profile.
-  const resolutionProfiles = buildResolutionProfiles(recipe.resolutions);
+  const resolutionsToUse =
+    args.resolutions && args.resolutions.length ? args.resolutions : recipe.resolutions;
+  const resolutionProfiles = buildResolutionProfiles(resolutionsToUse);
   const runProfiles = resolutionProfiles.length ? resolutionProfiles : recipe.profiles;
   if (resolutionProfiles.length) {
     console.log(
