@@ -20,12 +20,15 @@ Verify Bedrock auth if set above:
 ```bash
 node index.js --probe-bedrock
 ```
+## Start server:
+cd qa-tool
+lsof -ti tcp:4321 | xargs kill; node webui/server.js
 
-## Run
+## Run CLI
 
 ```bash
-# Deterministic, AI-free text + layout audit (no credentials needed):
-node index.js --csv pairs.csv --text-only
+# Deterministic, AI-free text + layout audit (no credentials needed) on 8 threads:
+node index.js --csv pairs.csv --threads 8 --text-only 
 ```
 
 With no `--out`, results land in `./<YYYYMMDDHHMMSS>_<csv filename>/` (date first, so runs sort chronologically and the source file is obvious — e.g. `20260910143512_pairs.csv/`).
