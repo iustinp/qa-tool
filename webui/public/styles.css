@@ -130,6 +130,11 @@ button.ghost { background: transparent; }
 .verdict.review { color: var(--run); }
 .verdict.error { color: var(--err); }
 .note { font-size: 12px; color: var(--muted); }
+.shots { display: flex; gap: 10px; margin-top: 10px; }
+.shot { flex: 1; min-width: 0; text-decoration: none; color: var(--muted); }
+.shot span { display: block; font-size: 11px; margin-bottom: 3px; text-transform: uppercase; letter-spacing: .4px; }
+.shot img { width: 100%; height: 130px; object-fit: cover; object-position: top; border: 1px solid var(--border); border-radius: 6px; background: #fff; display: block; }
+.shot:hover img { border-color: var(--accent); }
 .report-links { display: flex; gap: 14px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
 .report-link { color: var(--accent); font-size: 13px; text-decoration: none; }
 .report-link:hover { text-decoration: underline; }

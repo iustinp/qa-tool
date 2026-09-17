@@ -158,6 +158,14 @@
               <span class="note">${escapeHtml(p.note || '')}</span>
               ${p.reviewUrl ? `<a class="report-link" href="${p.reviewUrl}" target="_blank">review ↗</a>` : ''}
             </div>
+            ${
+              p.sourceShot || p.targetShot
+                ? `<div class="shots">
+                     ${p.sourceShot ? `<a class="shot" href="${p.sourceShot}" target="_blank"><span>source</span><img loading="lazy" src="${p.sourceShot}" alt="source" /></a>` : ''}
+                     ${p.targetShot ? `<a class="shot" href="${p.targetShot}" target="_blank"><span>target</span><img loading="lazy" src="${p.targetShot}" alt="target" /></a>` : ''}
+                   </div>`
+                : ''
+            }
           </div>
         </div>`
           )

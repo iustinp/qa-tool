@@ -242,15 +242,23 @@ function buildResults(job) {
     /* summary may be absent on a failed capture */
   }
   const rows = (summary && summary.results) || [];
-  const pairs = rows.map((r) => ({
-    source: r.sourceUrl,
-    target: r.targetUrl,
-    status: r.captureError ? 'error' : r.missingCount > 0 ? 'review' : 'ok',
-    note: r.captureError
-      ? String(r.captureError).slice(0, 80)
-      : `${r.missingCount ?? 0} missing · ${r.finishedReason || 'done'}`,
-    reviewUrl: r.slug ? reportRelUrl(job, `pairs/${r.slug}/layout-review.html`) : null,
-  }));
+  const pairs = rows.map((r) => {
+    const shot = (side) =>
+      r.slug && fileExists(job, `pairs/${r.slug}/screenshots/${side}-full.png`)
+        ? reportRelUrl(job, `pairs/${r.slug}/screenshots/${side}-full.png`)
+        : null;
+    return {
+      source: r.sourceUrl,
+      target: r.targetUrl,
+      status: r.captureError ? 'error' : r.missingCount > 0 ? 'review' : 'ok',
+      note: r.captureError
+        ? String(r.captureError).slice(0, 80)
+        : `${r.missingCount ?? 0} missing · ${r.finishedReason || 'done'}`,
+      reviewUrl: r.slug ? reportRelUrl(job, `pairs/${r.slug}/layout-review.html`) : null,
+      sourceShot: shot('source'),
+      targetShot: shot('target'),
+    };
+  });
   return {
     runId: job.id,
     label: job.label,
