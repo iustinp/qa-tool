@@ -40,6 +40,21 @@
           <option value="screening-only">Screening-only (no AI)</option>
         </select>
       </label>
+
+      <details class="ignore-box">
+        <summary>Ignore known issues (CSS selectors)</summary>
+        <p class="hint">One CSS selector per line. The matched element and everything
+          inside it is removed before comparison, so known-issue regions don't affect the result.</p>
+        <label class="field">
+          <span>Ignore on <strong>source</strong></span>
+          <textarea id="ignoreSource" rows="3" placeholder=".legacy-banner&#10;#old-promo"></textarea>
+        </label>
+        <label class="field">
+          <span>Ignore on <strong>target</strong></span>
+          <textarea id="ignoreTarget" rows="3" placeholder=".known-broken-block"></textarea>
+        </label>
+      </details>
+
       <div class="actions">
         <button id="startBtn" class="primary">Start run</button>
         <span id="startMsg" class="msg"></span>

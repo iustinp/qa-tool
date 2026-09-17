@@ -48,13 +48,15 @@ const jobs = new Map();
 const queue = [];
 let runningCount = 0;
 
-function createJob({ label, pairs, mode }) {
+function createJob({ label, pairs, mode, ignoreSource, ignoreTarget }) {
   const id = randomUUID();
   const now = Date.now();
   const job = {
     id,
     label: label || `run-${new Date(now).toISOString().slice(0, 19)}`,
     mode: RUN_MODES[mode] ? mode : 'full',
+    ignoreSource: ignoreSource || [],
+    ignoreTarget: ignoreTarget || [],
     status: 'queued',
     stage: 'queued',
     progress: 0,
@@ -107,6 +109,18 @@ function runReal(job) {
     const logStream = fs.createWriteStream(logPath);
 
     const args = ['index.js', '--csv', csvPath, '--out', outDir, ...RUN_MODES[job.mode]];
+
+    // If the run has per-side ignore selectors, emit a recipe and pass --recipe.
+    // JSON is valid YAML, so we can write the recipe without a YAML dependency.
+    if (job.ignoreSource.length || job.ignoreTarget.length) {
+      const recipe = {
+        ignoreSource: job.ignoreSource.map((selector) => ({ selector, reason: 'ui' })),
+        ignoreTarget: job.ignoreTarget.map((selector) => ({ selector, reason: 'ui' })),
+      };
+      const recipePath = path.join(job.runDir, 'recipe.yaml');
+      fs.writeFileSync(recipePath, JSON.stringify(recipe, null, 2));
+      args.push('--recipe', recipePath);
+    }
     touch(job, { status: 'running', stage: 'starting', progress: 1, outDir, logPath });
 
     const child = spawn(process.execPath, args, { cwd: PROJECT_ROOT });
@@ -284,6 +298,11 @@ function readBody(req) {
     req.on('error', reject);
   });
 }
+// Ignore selectors arrive as an array of strings or a newline-delimited string.
+function parseSelectors(input) {
+  const list = Array.isArray(input) ? input : String(input || '').split(/\r?\n/);
+  return list.map((s) => String(s).trim()).filter(Boolean);
+}
 // Parse a pasted/uploaded CSV of `source,target` (comma or semicolon), skip header.
 function parsePairs(csvText) {
   const pairs = [];
@@ -351,7 +370,13 @@ const server = http.createServer(async (req, res) => {
       if (!pairs.length) {
         return sendJson(res, 400, { error: 'No valid source,target pairs found.' });
       }
-      const job = createJob({ label: body.label, pairs, mode: body.mode });
+      const job = createJob({
+        label: body.label,
+        pairs,
+        mode: body.mode,
+        ignoreSource: parseSelectors(body.ignoreSource),
+        ignoreTarget: parseSelectors(body.ignoreTarget),
+      });
       return sendJson(res, 201, { jobId: job.id, status: job.status });
     }
 

@@ -7,6 +7,8 @@
     label: $('#labelInput'),
     pairs: $('#pairsInput'),
     modeSelect: $('#modeSelect'),
+    ignoreSource: $('#ignoreSource'),
+    ignoreTarget: $('#ignoreTarget'),
     browseBtn: $('#browseBtn'),
     csvFile: $('#csvFile'),
     startBtn: $('#startBtn'),
@@ -101,10 +103,13 @@
     }
     els.startBtn.disabled = true;
     try {
+      const toLines = (v) => v.split('\n').map((s) => s.trim()).filter(Boolean);
       const { jobId } = await API.createRun({
         label: els.label.value.trim(),
         csv,
         mode: els.modeSelect.value,
+        ignoreSource: toLines(els.ignoreSource.value),
+        ignoreTarget: toLines(els.ignoreTarget.value),
       });
       els.startMsg.textContent = `Started (${jobId.slice(0, 8)}…)`;
       els.pairs.value = '';
