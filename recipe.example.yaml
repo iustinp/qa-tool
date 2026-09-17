@@ -21,10 +21,12 @@ ignore:
   - selector: ".live-chat-widget"
     reason: third-party-widget
 
-# Per-side ignores — the matched element and its whole subtree are removed from
-# that side's capture before any comparison (screenshot, text, layout, OCR). Use
-# these for KNOWN ISSUES you don't want to affect run correctness. Source and
-# target DOMs differ, so the selectors differ — hence two separate lists.
+# Per-side ignores — the matched element STAYS in place (layout unchanged) but its
+# subtree is excluded from comparison (pears + text), and a semi-transparent
+# red/white diagonal hatch is painted over it so you can see exactly what the
+# selector caught and why it isn't compared. Use these for KNOWN ISSUES you don't
+# want to affect run correctness. Source and target DOMs differ, so the selectors
+# differ — hence two separate lists.
 ignoreSource:
   - selector: ".legacy-promo"
     reason: known-issue-not-migrated
