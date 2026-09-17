@@ -92,39 +92,118 @@
     return chips.join('');
   }
 
-  // Render the multi-select site chips from the distinct sites across all runs.
-  function renderSiteFilter() {
-    const sites = [...new Set(allRuns.map((r) => r.site).filter(Boolean))].sort();
-    for (const s of [...siteFilter]) if (!sites.includes(s)) siteFilter.delete(s); // prune gone sites
-    if (sites.length < 2) {
-      els.siteFilter.innerHTML = ''; // nothing to filter with one site
-      return;
-    }
-    const chip = (label, active, val) =>
-      `<button class="fchip${active ? ' active' : ''}" data-site="${val == null ? '' : escapeHtml(val)}">${escapeHtml(label)}</button>`;
+  // --- Searchable multi-select site dropdown (scales to many sites) -----------
+  // Selected sites pin above a separator; the searchable list of the rest sits
+  // below, so you can keep searching and adding. Built once; only its lists and
+  // the trigger label update on refresh (never rebuilt, to survive 1.2s polling).
+  let siteDropdownBuilt = false;
+  let lastSitesSig = '';
+  const sitesFromRuns = () => [...new Set(allRuns.map((r) => r.site).filter(Boolean))].sort();
+
+  function buildSiteDropdown() {
     els.siteFilter.innerHTML =
-      chip('All', siteFilter.size === 0, null) + sites.map((s) => chip(s, siteFilter.has(s), s)).join('');
-    els.siteFilter.querySelectorAll('.fchip').forEach((b) =>
-      b.addEventListener('click', () => {
-        const site = b.dataset.site;
-        if (!site) siteFilter.clear();
-        else if (siteFilter.has(site)) siteFilter.delete(site);
-        else siteFilter.add(site);
-        renderRuns(allRuns);
-      })
-    );
+      '<button type="button" class="ms-trigger" id="msTrigger">All sites ▾</button>' +
+      '<div class="ms-panel" id="msPanel" hidden>' +
+      '<input type="text" class="ms-search" id="msSearch" placeholder="Search sites…" autocomplete="off" />' +
+      '<div class="ms-selected" id="msSelected"></div>' +
+      '<hr class="ms-sep" id="msSep" />' +
+      '<div class="ms-options" id="msOptions"></div>' +
+      '</div>';
+    const panel = els.siteFilter.querySelector('#msPanel');
+    const search = els.siteFilter.querySelector('#msSearch');
+    els.siteFilter.querySelector('#msTrigger').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const willOpen = panel.hidden;
+      panel.hidden = !willOpen;
+      if (willOpen) {
+        search.value = '';
+        renderDropdownLists();
+        search.focus();
+      }
+    });
+    search.addEventListener('input', renderDropdownLists);
+    panel.addEventListener('click', (e) => e.stopPropagation());
+    document.addEventListener('click', () => {
+      panel.hidden = true;
+    });
+    siteDropdownBuilt = true;
   }
 
+  function updateTriggerLabel() {
+    const trigger = els.siteFilter.querySelector('#msTrigger');
+    if (!trigger) return;
+    const n = siteFilter.size;
+    trigger.textContent = `${n === 0 ? 'All sites' : n === 1 ? [...siteFilter][0] : `${n} sites`} ▾`;
+  }
+
+  function renderDropdownLists() {
+    const selectedEl = els.siteFilter.querySelector('#msSelected');
+    const optionsEl = els.siteFilter.querySelector('#msOptions');
+    const search = els.siteFilter.querySelector('#msSearch');
+    if (!selectedEl || !optionsEl) return;
+    const q = (search.value || '').trim().toLowerCase();
+    const sites = sitesFromRuns();
+    const selected = [...siteFilter].filter((s) => sites.includes(s)).sort();
+    const options = sites.filter((s) => !siteFilter.has(s) && s.toLowerCase().includes(q));
+    const row = (s, on) =>
+      `<button type="button" class="ms-opt${on ? ' on' : ''}" data-site="${escapeHtml(s)}">` +
+      `<span class="ms-box">${on ? '✓' : ''}</span><span class="ms-name">${escapeHtml(s)}</span></button>`;
+    selectedEl.innerHTML = selected.length
+      ? selected.map((s) => row(s, true)).join('') +
+        '<button type="button" class="ms-clear" id="msClear">Clear all</button>'
+      : '<div class="ms-empty">Showing all sites</div>';
+    optionsEl.innerHTML = options.length
+      ? options.map((s) => row(s, false)).join('')
+      : '<div class="ms-empty">No matches</div>';
+    els.siteFilter.querySelectorAll('.ms-opt').forEach((b) =>
+      b.addEventListener('click', () => {
+        const s = b.dataset.site;
+        if (siteFilter.has(s)) siteFilter.delete(s);
+        else siteFilter.add(s);
+        renderDropdownLists();
+        updateTriggerLabel();
+        renderRunsList();
+        search.focus();
+      })
+    );
+    const clear = els.siteFilter.querySelector('#msClear');
+    if (clear)
+      clear.addEventListener('click', () => {
+        siteFilter.clear();
+        renderDropdownLists();
+        updateTriggerLabel();
+        renderRunsList();
+        search.focus();
+      });
+  }
+
+  // Data/dropdown sync — runs on every refresh (incl. polling). Cheap: never
+  // rebuilds the dropdown; only prunes stale selections + updates label/lists.
   function renderRuns(runs) {
     allRuns = runs;
-    renderSiteFilter();
-    const shown = siteFilter.size ? runs.filter((r) => r.site && siteFilter.has(r.site)) : runs;
-    // Poll every non-terminal run regardless of the filter (background runs keep updating).
+    if (!siteDropdownBuilt) buildSiteDropdown();
+    const sites = sitesFromRuns();
+    for (const s of [...siteFilter]) if (!sites.includes(s)) siteFilter.delete(s); // prune gone sites
+    els.siteFilter.style.display = sites.length < 2 ? 'none' : '';
+    updateTriggerLabel();
+    const sig = sites.join('|');
+    const panel = els.siteFilter.querySelector('#msPanel');
+    if (panel && !panel.hidden && sig !== lastSitesSig) renderDropdownLists();
+    lastSitesSig = sig;
+    // Poll every non-terminal run regardless of the filter (background runs update).
     runs.forEach((r) => {
       if (r.status !== 'done' && r.status !== 'error' && !polling.has(r.id)) startPolling(r.id);
     });
+    renderRunsList();
+  }
+
+  // Render just the run rows (respecting the active filter).
+  function renderRunsList() {
+    const shown = siteFilter.size
+      ? allRuns.filter((r) => r.site && siteFilter.has(r.site))
+      : allRuns;
     if (!shown.length) {
-      els.runsList.innerHTML = runs.length
+      els.runsList.innerHTML = allRuns.length
         ? '<p class="empty">No runs for the selected site(s).</p>'
         : '<p class="empty">No runs yet. Start one above.</p>';
       return;

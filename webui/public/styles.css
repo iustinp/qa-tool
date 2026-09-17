@@ -112,14 +112,33 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 button.ghost { background: transparent; }
 .msg { font-size: 12px; color: var(--muted); }
 
-.site-filter { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
-.site-filter:empty { display: none; }
-.fchip {
-  font-size: 12px; padding: 3px 10px; border-radius: 999px; cursor: pointer;
-  background: var(--panel-2); border: 1px solid var(--border); color: var(--muted);
+.site-filter { position: relative; margin-bottom: 12px; }
+.ms-trigger {
+  width: 100%; text-align: left; background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; cursor: pointer; font: inherit;
 }
-.fchip:hover { border-color: var(--accent); }
-.fchip.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.ms-trigger:hover { border-color: var(--accent); }
+.ms-panel {
+  position: absolute; z-index: 30; left: 0; right: 0; margin-top: 4px; padding: 8px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.45);
+}
+.ms-search { width: 100%; margin-bottom: 8px; }
+.ms-selected, .ms-options { display: flex; flex-direction: column; gap: 2px; }
+.ms-options { max-height: 260px; overflow-y: auto; }
+.ms-sep { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
+.ms-opt {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  background: transparent; border: 1px solid transparent; color: var(--text);
+  border-radius: 6px; padding: 5px 8px; cursor: pointer; font: inherit; font-size: 13px;
+}
+.ms-opt:hover { background: var(--panel-2); }
+.ms-opt.on { color: var(--accent); }
+.ms-box { width: 14px; flex: 0 0 14px; text-align: center; color: var(--accent); }
+.ms-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-empty { font-size: 12px; color: var(--muted); padding: 4px 8px; }
+.ms-clear { align-self: flex-start; background: none; border: none; color: var(--muted); font-size: 12px; cursor: pointer; padding: 4px 8px; }
+.ms-clear:hover { color: var(--accent); text-decoration: underline; border: none; }
 .runs { display: flex; flex-direction: column; gap: 10px; }
 .empty { color: var(--muted); font-size: 13px; }
 .run {
