@@ -8,6 +8,9 @@
     pairs: $('#pairsInput'),
     modeSelect: $('#modeSelect'),
     threads: $('#threadsInput'),
+    recipeSelect: $('#recipeSelect'),
+    saveRecipeBtn: $('#saveRecipeBtn'),
+    deleteRecipeBtn: $('#deleteRecipeBtn'),
     ignoreSource: $('#ignoreSource'),
     ignoreTarget: $('#ignoreTarget'),
     clickSource: $('#clickSource'),
@@ -269,6 +272,81 @@
     }
   });
 
+  // --- Site recipes ---
+  let recipeCache = [];
+  async function refreshRecipes() {
+    try {
+      const { recipes } = await API.listRecipes();
+      recipeCache = recipes || [];
+    } catch {
+      recipeCache = [];
+    }
+    const current = els.recipeSelect.value;
+    els.recipeSelect.innerHTML =
+      '<option value="">— none —</option>' +
+      recipeCache
+        .map((r) => `<option value="${escapeHtml(r.name)}">${escapeHtml(r.name)}</option>`)
+        .join('');
+    if (recipeCache.some((r) => r.name === current)) els.recipeSelect.value = current;
+    els.deleteRecipeBtn.hidden = !els.recipeSelect.value;
+  }
+  // Apply a recipe's saved settings to the ignore/click boxes (and mode/threads).
+  function applyRecipe(r) {
+    els.ignoreSource.value = (r.ignoreSource || []).join('\n');
+    els.ignoreTarget.value = (r.ignoreTarget || []).join('\n');
+    els.clickSource.value = (r.clickSource || []).join('\n');
+    els.clickTarget.value = (r.clickTarget || []).join('\n');
+    if (r.mode) els.modeSelect.value = r.mode;
+    if (r.threads) els.threads.value = r.threads;
+    document.querySelectorAll('.ignore-box').forEach((box) => {
+      box.open = [...box.querySelectorAll('textarea')].some((t) => t.value.trim());
+    });
+  }
+  els.recipeSelect.addEventListener('change', () => {
+    els.deleteRecipeBtn.hidden = !els.recipeSelect.value;
+    const r = recipeCache.find((x) => x.name === els.recipeSelect.value);
+    if (r) {
+      applyRecipe(r);
+      els.startMsg.textContent = `Loaded recipe "${r.name}"`;
+    }
+  });
+  els.saveRecipeBtn.addEventListener('click', async () => {
+    const suggested = els.recipeSelect.value || els.label.value.trim() || '';
+    const name = window.prompt('Save site recipe as:', suggested);
+    if (!name || !name.trim()) return;
+    try {
+      const toLines = (v) => v.split('\n').map((s) => s.trim()).filter(Boolean);
+      const { name: saved } = await API.saveRecipe({
+        name: name.trim(),
+        mode: els.modeSelect.value,
+        threads: Math.max(1, parseInt(els.threads.value, 10) || 1),
+        ignoreSource: toLines(els.ignoreSource.value),
+        ignoreTarget: toLines(els.ignoreTarget.value),
+        clickSource: toLines(els.clickSource.value),
+        clickTarget: toLines(els.clickTarget.value),
+      });
+      await refreshRecipes();
+      els.recipeSelect.value = saved;
+      els.deleteRecipeBtn.hidden = false;
+      els.startMsg.textContent = `Saved recipe "${saved}"`;
+    } catch (e) {
+      els.startMsg.textContent = `Save recipe failed: ${e.message}`;
+    }
+  });
+  els.deleteRecipeBtn.addEventListener('click', async () => {
+    const name = els.recipeSelect.value;
+    if (!name || !window.confirm(`Delete recipe "${name}"?`)) return;
+    try {
+      await API.deleteRecipe(name);
+      await refreshRecipes();
+      els.recipeSelect.value = '';
+      els.deleteRecipeBtn.hidden = true;
+      els.startMsg.textContent = `Deleted recipe "${name}"`;
+    } catch (e) {
+      els.startMsg.textContent = `Delete failed: ${e.message}`;
+    }
+  });
+
   // Clicking the "New run" header clears the whole form back to defaults.
   function clearForm() {
     els.label.value = '';
@@ -281,6 +359,8 @@
     document.querySelectorAll('.ignore-box').forEach((box) => {
       box.open = false;
     });
+    els.recipeSelect.value = '';
+    els.deleteRecipeBtn.hidden = true;
     els.startMsg.textContent = '';
     els.label.focus();
   }
@@ -309,6 +389,6 @@
     } catch {
       els.modeBadge.textContent = 'offline';
     }
-    await refreshRuns();
+    await Promise.all([refreshRuns(), refreshRecipes()]);
   })();
 })();

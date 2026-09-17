@@ -21,6 +21,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { randomUUID, createHash } = require('crypto');
 const sharp = require('sharp'); // already a project dependency (used by the engine)
+const YAML = require('yaml'); // already a project dependency (used by lib/recipe.js)
 
 const PORT = process.env.WEBUI_PORT ? Number(process.env.WEBUI_PORT) : 4321;
 const ENGINE_MODE = (process.env.WEBUI_ENGINE || 'real').toLowerCase(); // "real" | "stub"
@@ -32,8 +33,12 @@ const PROJECT_ROOT = path.join(__dirname, '..');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const SAMPLE_RESULTS = path.join(__dirname, 'sample-results');
 const RUNS_DIR = path.join(__dirname, 'runs'); // per-job workspace (gitignored)
+// Saved site recipes live at the project root (git-tracked, shareable, and
+// usable directly by the engine via --recipe).
+const RECIPES_DIR = path.join(PROJECT_ROOT, 'recipes');
 
 fs.mkdirSync(RUNS_DIR, { recursive: true });
+fs.mkdirSync(RECIPES_DIR, { recursive: true });
 
 // Modes the UI can request; each maps to an engine flag (or none = full run).
 const RUN_MODES = {
@@ -430,6 +435,70 @@ function parseSelectors(input) {
   const list = Array.isArray(input) ? input : String(input || '').split(/\r?\n/);
   return list.map((s) => String(s).trim()).filter(Boolean);
 }
+
+// --- Named site recipes (git-tracked YAML in RECIPES_DIR) ----------------------
+function safeRecipeName(name) {
+  return String(name || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '')
+    .slice(0, 60);
+}
+// Flatten a recipe's selector rules (or bare strings) to plain selector strings
+// for the form, and surface the optional UI hints (mode/threads).
+function recipeToForm(name, doc) {
+  const sels = (list) =>
+    (Array.isArray(list) ? list : [])
+      .map((r) => (typeof r === 'string' ? r : r && r.selector))
+      .filter((s) => typeof s === 'string' && s.trim());
+  return {
+    name,
+    mode: doc.mode || null,
+    threads: doc.threads || null,
+    ignoreSource: sels(doc.ignoreSource),
+    ignoreTarget: sels(doc.ignoreTarget),
+    clickSource: sels(doc.clickSource),
+    clickTarget: sels(doc.clickTarget),
+  };
+}
+function listRecipes() {
+  let files = [];
+  try {
+    files = fs.readdirSync(RECIPES_DIR).filter((f) => /\.ya?ml$/i.test(f));
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const f of files) {
+    try {
+      const doc = YAML.parse(fs.readFileSync(path.join(RECIPES_DIR, f), 'utf8')) || {};
+      out.push(recipeToForm(f.replace(/\.ya?ml$/i, ''), doc));
+    } catch {
+      /* skip an unparseable recipe */
+    }
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+function saveRecipe(body) {
+  const name = safeRecipeName(body.name);
+  if (!name) throw new Error('Invalid recipe name');
+  const rules = (input) => parseSelectors(input).map((selector) => ({ selector, reason: 'ui' }));
+  const doc = {
+    ignoreSource: rules(body.ignoreSource),
+    ignoreTarget: rules(body.ignoreTarget),
+    clickSource: rules(body.clickSource),
+    clickTarget: rules(body.clickTarget),
+  };
+  if (body.mode) doc.mode = body.mode; // UI hints — the engine ignores unknown keys
+  if (body.threads) doc.threads = Math.min(16, Math.max(1, Number(body.threads) || 1));
+  fs.writeFileSync(path.join(RECIPES_DIR, `${name}.yaml`), YAML.stringify(doc));
+  return name;
+}
+function deleteRecipe(name) {
+  const safe = safeRecipeName(name);
+  const p = path.join(RECIPES_DIR, `${safe}.yaml`);
+  if (safe && p.startsWith(RECIPES_DIR) && fs.existsSync(p)) fs.unlinkSync(p);
+}
 // Parse a pasted/uploaded CSV of `source,target` (comma or semicolon), skip header.
 function parsePairs(csvText) {
   const pairs = [];
@@ -489,6 +558,25 @@ const server = http.createServer(async (req, res) => {
         running: runningCount,
         queued: queue.length,
       });
+    }
+
+    // --- Saved site recipes ---
+    if (pathname === '/api/recipes' && req.method === 'GET') {
+      return sendJson(res, 200, { recipes: listRecipes() });
+    }
+    if (pathname === '/api/recipes' && req.method === 'POST') {
+      const body = await readBody(req);
+      try {
+        const name = saveRecipe(body);
+        return sendJson(res, 201, { name });
+      } catch (e) {
+        return sendJson(res, 400, { error: String(e.message || e) });
+      }
+    }
+    const recipeMatch = pathname.match(/^\/api\/recipes\/([^/]+)$/);
+    if (recipeMatch && req.method === 'DELETE') {
+      deleteRecipe(decodeURIComponent(recipeMatch[1]));
+      return sendJson(res, 200, { ok: true });
     }
 
     if (pathname === '/api/runs' && req.method === 'POST') {

@@ -72,6 +72,9 @@ body {
 .panel-head { display: flex; align-items: center; justify-content: space-between; }
 
 .field { display: block; margin-bottom: 14px; }
+.recipe-bar { display: flex; gap: 8px; align-items: stretch; }
+.recipe-bar select { flex: 1; min-width: 0; }
+.recipe-bar button { white-space: nowrap; }
 .field-row { display: flex; gap: 12px; }
 .field-row .field { flex: 1; }
 .field-row .threads-field { flex: 0 0 90px; }

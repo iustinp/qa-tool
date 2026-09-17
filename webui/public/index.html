@@ -20,6 +20,16 @@
     <section class="panel" aria-labelledby="newRunTitle">
       <h2 id="newRunTitle" title="Clear the form" role="button" tabindex="0">New run</h2>
       <label class="field">
+        <span>Site recipe</span>
+        <div class="recipe-bar">
+          <select id="recipeSelect" title="Load a saved site recipe into the form">
+            <option value="">— none —</option>
+          </select>
+          <button type="button" id="saveRecipeBtn" class="ghost" title="Save the current ignore/click settings as a recipe">Save…</button>
+          <button type="button" id="deleteRecipeBtn" class="ghost" title="Delete the selected recipe" hidden>✕</button>
+        </div>
+      </label>
+      <label class="field">
         <span>Label <em>(optional)</em></span>
         <input id="labelInput" type="text" placeholder="e.g. usta-foundation" />
       </label>
