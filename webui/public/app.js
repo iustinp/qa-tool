@@ -47,6 +47,7 @@
     const cnt = (a) => (Array.isArray(a) ? a.length : 0);
     const chips = [`<span class="chip">${escapeHtml(r.mode || 'full')}</span>`];
     if (r.threads > 1) chips.push(`<span class="chip">${r.threads} threads</span>`);
+    if (r.recipe) chips.push(`<span class="chip" title="Site recipe used">▦ ${escapeHtml(r.recipe)}</span>`);
     const titleFor = (label, s, t) => {
       const parts = [];
       if (cnt(s)) parts.push(`source:\n  ${s.join('\n  ')}`);
@@ -77,7 +78,7 @@
       <div class="run" data-id="${r.id}">
         <div class="run-main">
           <div class="run-label">${escapeHtml(r.label)}</div>
-          <div class="run-meta">${r.pairCount} pair(s) · ${fmtTime(r.createdAt)}</div>
+          <div class="run-meta">${r.site ? `${escapeHtml(r.site)} · ` : ''}${r.pairCount} pair(s) · ${fmtTime(r.createdAt)}</div>
           <div class="run-config">${runConfigChips(r)}</div>
           ${
             r.status === 'done' && (r.analyzed != null || r.loadErrors)
@@ -177,6 +178,7 @@
         csv,
         mode: els.modeSelect.value,
         threads: Math.max(1, parseInt(els.threads.value, 10) || 1),
+        recipe: els.recipeSelect.value || null,
         ignoreSource: toLines(els.ignoreSource.value),
         ignoreTarget: toLines(els.ignoreTarget.value),
         clickSource: toLines(els.clickSource.value),

@@ -43,8 +43,8 @@ body {
   grid-template-columns: 360px minmax(320px, 1fr);
   gap: 20px;
   padding: 20px;
-  max-width: 1500px;
-  margin: 0; /* left-align so all columns get room instead of centering */
+  max-width: none; /* use the full screen width */
+  margin: 0;
   align-items: start;
 }
 /* When results is open, become three columns so nothing overlaps. */

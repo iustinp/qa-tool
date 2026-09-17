@@ -54,14 +54,30 @@ const jobs = new Map();
 const queue = [];
 let runningCount = 0;
 
-function createJob({ label, pairs, mode, threads, ignoreSource, ignoreTarget, clickSource, clickTarget }) {
+function hostOf(u) {
+  try {
+    return new URL(u).host;
+  } catch {
+    return null;
+  }
+}
+
+function createJob({
+  label, pairs, mode, threads, recipe, ignoreSource, ignoreTarget, clickSource, clickTarget,
+}) {
   const id = randomUUID();
   const now = Date.now();
+  // A run's site is intrinsic — the source host of its pairs (all pairs normally
+  // share one). It's what the runs filter groups by, independent of any recipe.
+  const hosts = [...new Set(pairs.map((p) => hostOf(p.source)).filter(Boolean))];
   const job = {
     id,
     label: label || `run-${new Date(now).toISOString().slice(0, 19)}`,
     mode: RUN_MODES[mode] ? mode : 'full',
     threads: Math.min(16, Math.max(1, Number(threads) || 1)),
+    recipe: recipe || null, // name of the site recipe it was run with (provenance)
+    site: hosts.length === 1 ? hosts[0] : hosts[0] || null, // grouping key
+    sites: hosts, // all distinct source hosts (usually one)
     ignoreSource: ignoreSource || [],
     ignoreTarget: ignoreTarget || [],
     clickSource: clickSource || [],
@@ -93,7 +109,7 @@ function touch(job, patch) {
 // history (and the Load button) survive a restart. Ephemeral fields (paths, the
 // child pid, the log tail) are not stored — they're recomputed on load.
 const PERSIST_FIELDS = [
-  'id', 'label', 'mode', 'threads',
+  'id', 'label', 'mode', 'threads', 'recipe', 'site', 'sites',
   'ignoreSource', 'ignoreTarget', 'clickSource', 'clickTarget',
   'status', 'stage', 'progress', 'pairCount', 'pairs',
   'createdAt', 'updatedAt', 'error', 'resultsUrl', 'reportUrl', 'analyzed', 'loadErrors',
@@ -590,6 +606,7 @@ const server = http.createServer(async (req, res) => {
         pairs,
         mode: body.mode,
         threads: body.threads,
+        recipe: body.recipe || null,
         ignoreSource: parseSelectors(body.ignoreSource),
         ignoreTarget: parseSelectors(body.ignoreTarget),
         clickSource: parseSelectors(body.clickSource),
