@@ -20,11 +20,24 @@ Verify Bedrock auth if set above:
 ```bash
 node index.js --probe-bedrock
 ```
-## Start server:
-cd qa-tool
-lsof -ti tcp:4321 | xargs kill; node webui/server.js
+## Web UI
 
-Then open http://localhost:4321/ in your browser. 
+A local web app to run comparisons, manage per-site recipes, and browse results — no CLI needed. It drives the same engine as the CLI.
+
+```bash
+# Start it (kills anything already on the port first), then open http://localhost:4321
+lsof -ti tcp:4321 | xargs kill; node webui/server.js
+```
+
+What it gives you:
+
+- **Start runs from the browser** — paste `source,target` pairs (or **Browse** a CSV), pick a **mode** (Full / Text-only / Screening-only) and **threads**, and go. Live progress; results open in a side panel with source/target screenshot thumbnails and links to the reports.
+- **Site recipes** — save a website's specifics (ignore/click selectors, resolutions) as a named, git-shareable recipe and load it before a run. See [Site recipes](#site-recipes).
+- **Site filter** — every run is tagged by its source host; a searchable multi-select dropdown filters the history by site. Loading a recipe focuses the list on its site; starting a run always brings its site into view.
+- **Run history** — persisted to disk (survives restarts), newest first with "Load more". Each run shows config chips (mode / threads / ignore / click / recipe — click a chip for the exact selectors) and an analyzed / load-errors count. **Load** replays a run's settings into the form to re-run with tweaks; **✕** deletes it (from the list and disk).
+- **Resolutions** — analyze at multiple screen widths; the reports come back tabbed per resolution. See [Multi-resolution](#multi-resolution).
+
+Runs are stored under `webui/runs/<id>/` (gitignored); saved recipes under `recipes/` (git-tracked, shareable). Server env knobs: `WEBUI_PORT` (default 4321), `WEBUI_MAX_CONCURRENT` (default 2), `WEBUI_ENGINE=stub` (fake runs for UI work), `--port <n>`.
 
 ## Run CLI
 
@@ -77,17 +90,41 @@ Open `pairs/<slug>/layout-review.html` from a run to inspect the source↔target
 | `--layout-canonical` / `--no-layout-canonical` | on | Compare positioned "pears" (DOM-agnostic). Off falls back to raw DOM geometry. |
 | `--layout-ocr` / `--no-layout-ocr` | off | Derive text geometry by OCR of the screenshots (needs the `tesseract` binary). |
 | `--cache` / `--no-cache` | off | Reuse vision segment/match results for identical inputs (`PPD_CACHE=1` also enables). |
-| `--recipe <file>` | none | Per-site YAML: ignore/mask/normalize rules, capture profiles, interaction hints. |
+| `--recipe <file>` | none | Per-site YAML: ignore/click selectors, resolutions, mask/normalize, profiles. See [Site recipes](#site-recipes). |
 | `--probe-bedrock` | — | One auth check call; exits 0 if credentials work. |
 | `--help`, `-h` | — | Full option + environment reference. |
 
 Run `node index.js --help` for the complete list, including `PPD_*` environment tuning.
 
+## Site recipes
+
+A **recipe** is a per-site YAML file (`--recipe <file>`, or picked in the Web UI) that captures a website's specifics so runs of its pages reflect real correctness. Recipes are plain YAML, usable by both the CLI and the UI, and meant to be committed to `recipes/` and shared with the team. See [`recipe.example.yaml`](./recipe.example.yaml) for the full annotated format. The main fields:
+
+- **`ignoreSource` / `ignoreTarget`** — CSS selectors for **known-issue regions** to exclude from comparison, per side (source and target DOMs differ). The matched element stays in place but is hatched over (a red/white overlay) and left out of the pears/text audit, so a known issue can't skew the result — and you can see exactly what was ignored.
+- **`clickSource` / `clickTarget`** — selectors to **click before capture if present** (e.g. a cookie **Accept**/**Deny** button, an "enter site" gate). Per side; runs deterministically even in text-only mode.
+- **`resolutions`** — the widths to analyze at (see below).
+- Also supported: shared `ignore` (both sides), `mask` (visual-diff-only), `normalize` (text rewrites), and capture `profiles`.
+
+In the Web UI these are the **ignore / click / resolutions** boxes; **Save…** stores them as a named recipe (tagged with the site so loading it filters the runs list).
+
+## Multi-resolution
+
+Sites serve different content and layouts at different breakpoints — and often by user-agent too. A recipe's `resolutions` list runs the whole pipeline **once per width**:
+
+```yaml
+resolutions:
+  - { width: 1440, ua: desktop }   # desktop UA, DPR 1
+  - { width: 768,  ua: mobile }    # phone UA + touch + DPR 3 → the site's mobile content
+  - { width: 375,  ua: mobile }
+```
+
+Each resolution gets its own screenshots, pears, and audit, and both `report.html` and `CUSTOMER-Report.html` become **tabbed by resolution** — each tab labeled by width with a coloured badge of that resolution's worst score, so a bad breakpoint stands out even if the first tab looks green. Per-pair reviews are `layout-review-<width>.html`. With no `resolutions`, behavior is unchanged (single desktop capture). In the Web UI, add widths in the **Resolutions (widths)** box.
+
 ## Reports
 
 > ⚠️ **This tool is being developed fast.** The reports change often, and the UI may gain or lose controls before this description catches up. If something on screen doesn't match what's written here, trust the screen — and the tooltips (hover any toolbar control in the layout review).
 
-A run produces three HTML reports. Open them straight from the run folder (they are self-contained — they also work over `file://`).
+A run produces three HTML reports. Open them straight from the run folder (they are self-contained — they also work over `file://`). When a run uses multiple [resolutions](#multi-resolution), `report.html` and `CUSTOMER-Report.html` are **tabbed by resolution** (each tab badged with that resolution's worst score).
 
 ### `report.html` — the internal scoreboard
 
@@ -142,5 +179,6 @@ All env loading is from **this directory only** (`lib/load-env.js`).
 - `pairs/<slug>/` — screenshots, crops, `pair-report.json`, `text-audit.json`
   - `layout-review.html` — interactive source↔target overlay (matched/missing/extra + drift connectors)
   - `layout-audit.json`, `source-clm.json`, `target-clm.json`, and `crawl.json` (with `--crawl`)
+  - Multi-resolution runs also write per-width variants: `screenshots/source-<width>-full.png`, `layout-audit-<width>.json`, `<width>-source-clm.json`, `layout-review-<width>.html`.
 
 Debug detail: `<out>/run-debug.log` (not stdout).
