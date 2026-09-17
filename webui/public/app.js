@@ -7,6 +7,11 @@
     label: $('#labelInput'),
     pairs: $('#pairsInput'),
     modeSelect: $('#modeSelect'),
+    threads: $('#threadsInput'),
+    ignoreSource: $('#ignoreSource'),
+    ignoreTarget: $('#ignoreTarget'),
+    clickSource: $('#clickSource'),
+    clickTarget: $('#clickTarget'),
     browseBtn: $('#browseBtn'),
     csvFile: $('#csvFile'),
     startBtn: $('#startBtn'),
@@ -33,6 +38,31 @@
     return 'queued';
   }
 
+  // Config chips showing how a run was configured (Mode + ignore/click counts).
+  // The actual selectors appear on hover so past runs stay understandable.
+  function runConfigChips(r) {
+    const cnt = (a) => (Array.isArray(a) ? a.length : 0);
+    const chips = [`<span class="chip">${escapeHtml(r.mode || 'full')}</span>`];
+    if (r.threads > 1) chips.push(`<span class="chip">${r.threads} threads</span>`);
+    const titleFor = (label, s, t) => {
+      const parts = [];
+      if (cnt(s)) parts.push(`source:\n  ${s.join('\n  ')}`);
+      if (cnt(t)) parts.push(`target:\n  ${t.join('\n  ')}`);
+      return `${label}\n${parts.join('\n')}`;
+    };
+    if (cnt(r.ignoreSource) || cnt(r.ignoreTarget)) {
+      chips.push(
+        `<span class="chip" title="${escapeHtml(titleFor('Ignored', r.ignoreSource, r.ignoreTarget))}">ignore ${cnt(r.ignoreSource)}/${cnt(r.ignoreTarget)}</span>`
+      );
+    }
+    if (cnt(r.clickSource) || cnt(r.clickTarget)) {
+      chips.push(
+        `<span class="chip" title="${escapeHtml(titleFor('Clicked', r.clickSource, r.clickTarget))}">click ${cnt(r.clickSource)}/${cnt(r.clickTarget)}</span>`
+      );
+    }
+    return chips.join('');
+  }
+
   function renderRuns(runs) {
     if (!runs.length) {
       els.runsList.innerHTML = '<p class="empty">No runs yet. Start one above.</p>';
@@ -45,15 +75,26 @@
         <div class="run-main">
           <div class="run-label">${escapeHtml(r.label)}</div>
           <div class="run-meta">${r.pairCount} pair(s) · ${fmtTime(r.createdAt)}</div>
+          <div class="run-config">${runConfigChips(r)}</div>
+          ${
+            r.status === 'done' && (r.analyzed != null || r.loadErrors)
+              ? `<div class="run-stat">${r.analyzed ?? '?'} analyzed${
+                  r.loadErrors ? ` · <span class="err-count">${r.loadErrors} load error${r.loadErrors === 1 ? '' : 's'}</span>` : ''
+                }</div>`
+              : ''
+          }
         </div>
         <div class="run-side">
           <span class="status ${statusClass(r.status)}">${r.stage || r.status}</span>
           <div class="bar"><div class="bar-fill" style="width:${r.progress || 0}%"></div></div>
-          ${
-            r.status === 'done'
-              ? `<button class="ghost view-btn" data-id="${r.id}">View</button>`
-              : ''
-          }
+          <div class="run-actions">
+            <button class="ghost load-btn" data-id="${r.id}" title="Load this run's settings into the form">Load</button>
+            ${
+              r.status === 'done'
+                ? `<button class="ghost view-btn" data-id="${r.id}">View</button>`
+                : ''
+            }
+          </div>
         </div>
       </div>`
       )
@@ -68,6 +109,32 @@
     els.runsList.querySelectorAll('.view-btn').forEach((b) =>
       b.addEventListener('click', () => openResults(b.dataset.id))
     );
+    els.runsList.querySelectorAll('.load-btn').forEach((b) =>
+      b.addEventListener('click', () => loadRun(b.dataset.id))
+    );
+  }
+
+  // Load a run's settings back into the New-run form (overwrites current values).
+  async function loadRun(jobId) {
+    try {
+      const job = await API.getRun(jobId);
+      els.label.value = job.label || '';
+      els.pairs.value = (job.pairs || []).map((p) => `${p.source},${p.target}`).join('\n');
+      els.modeSelect.value = job.mode || 'text-only';
+      els.threads.value = job.threads || 1;
+      els.ignoreSource.value = (job.ignoreSource || []).join('\n');
+      els.ignoreTarget.value = (job.ignoreTarget || []).join('\n');
+      els.clickSource.value = (job.clickSource || []).join('\n');
+      els.clickTarget.value = (job.clickTarget || []).join('\n');
+      // Expand the ignore/click boxes that now hold selectors so they're visible.
+      document.querySelectorAll('.ignore-box').forEach((box) => {
+        box.open = [...box.querySelectorAll('textarea')].some((t) => t.value.trim());
+      });
+      els.startMsg.textContent = `Loaded settings from "${job.label || jobId.slice(0, 8)}"`;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (e) {
+      els.startMsg.textContent = `Load failed: ${e.message}`;
+    }
   }
 
   function startPolling(jobId) {
@@ -101,14 +168,20 @@
     }
     els.startBtn.disabled = true;
     try {
+      const toLines = (v) => v.split('\n').map((s) => s.trim()).filter(Boolean);
       const { jobId } = await API.createRun({
         label: els.label.value.trim(),
         csv,
         mode: els.modeSelect.value,
+        threads: Math.max(1, parseInt(els.threads.value, 10) || 1),
+        ignoreSource: toLines(els.ignoreSource.value),
+        ignoreTarget: toLines(els.ignoreTarget.value),
+        clickSource: toLines(els.clickSource.value),
+        clickTarget: toLines(els.clickTarget.value),
       });
       els.startMsg.textContent = `Started (${jobId.slice(0, 8)}…)`;
-      els.pairs.value = '';
-      els.label.value = '';
+      // Keep the pairs, label, and ignore/click selectors in place so the run can
+      // be tweaked and resubmitted without re-entering everything.
       await refreshRuns();
       startPolling(jobId);
     } catch (e) {
@@ -149,6 +222,14 @@
               <span class="note">${escapeHtml(p.note || '')}</span>
               ${p.reviewUrl ? `<a class="report-link" href="${p.reviewUrl}" target="_blank">review ↗</a>` : ''}
             </div>
+            ${
+              p.sourceShot || p.targetShot
+                ? `<div class="shots">
+                     ${p.sourceShot ? `<a class="shot" href="${p.sourceShotFull || p.sourceShot}" target="_blank"><span>source</span><img loading="lazy" src="${p.sourceShot}" alt="source" /></a>` : ''}
+                     ${p.targetShot ? `<a class="shot" href="${p.targetShotFull || p.targetShot}" target="_blank"><span>target</span><img loading="lazy" src="${p.targetShot}" alt="target" /></a>` : ''}
+                   </div>`
+                : ''
+            }
           </div>
         </div>`
           )
@@ -185,6 +266,30 @@
       els.startMsg.textContent = `Could not read file: ${e.message}`;
     } finally {
       els.csvFile.value = ''; // allow re-selecting the same file
+    }
+  });
+
+  // Clicking the "New run" header clears the whole form back to defaults.
+  function clearForm() {
+    els.label.value = '';
+    els.pairs.value = '';
+    els.modeSelect.value = 'text-only';
+    els.threads.value = 1;
+    [els.ignoreSource, els.ignoreTarget, els.clickSource, els.clickTarget].forEach((t) => {
+      t.value = '';
+    });
+    document.querySelectorAll('.ignore-box').forEach((box) => {
+      box.open = false;
+    });
+    els.startMsg.textContent = '';
+    els.label.focus();
+  }
+  const newRunTitle = $('#newRunTitle');
+  newRunTitle.addEventListener('click', clearForm);
+  newRunTitle.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      clearForm();
     }
   });
 

@@ -60,9 +60,23 @@ body {
   padding: 18px;
 }
 .panel h2 { margin: 0 0 14px; font-size: 15px; }
+/* "New run" header doubles as a clear-the-form button. */
+#newRunTitle {
+  display: inline-block; cursor: pointer; user-select: none;
+  border: 1px solid transparent; border-radius: 8px; padding: 3px 9px; margin: -3px -9px 12px;
+  transition: border-color .15s ease, background .15s ease;
+}
+#newRunTitle:hover, #newRunTitle:focus-visible { border-color: var(--border); background: var(--panel-2); outline: none; }
+#newRunTitle::after { content: " ⌫"; color: var(--muted); font-size: 13px; opacity: 0; transition: opacity .15s ease; }
+#newRunTitle:hover::after, #newRunTitle:focus-visible::after { opacity: 1; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; }
 
 .field { display: block; margin-bottom: 14px; }
+.field-row { display: flex; gap: 12px; }
+.field-row .field { flex: 1; }
+.field-row .threads-field { flex: 0 0 90px; }
+/* Pairs box: don't wrap long URLs — scroll horizontally so each pair reads on one line. */
+#pairsInput { white-space: pre; overflow-x: auto; }
 .field > span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
 .field em { color: var(--muted); font-style: normal; }
 input, textarea {
@@ -76,6 +90,13 @@ select { width: 100%; background: var(--panel-2); color: var(--text); border: 1p
 select:focus { outline: none; border-color: var(--accent); }
 .link-btn { background: none; border: none; color: var(--accent); padding: 0 0 0 8px; font-size: 12px; cursor: pointer; }
 .link-btn:hover { text-decoration: underline; border: none; }
+
+.ignore-box { margin-bottom: 14px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; background: var(--panel-2); }
+.ignore-box summary { cursor: pointer; font-size: 13px; color: var(--text); user-select: none; }
+.ignore-box[open] summary { margin-bottom: 8px; }
+.ignore-box .hint { font-size: 12px; color: var(--muted); margin: 4px 0 10px; }
+.ignore-box .field { margin-bottom: 10px; }
+.ignore-box textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 
 .actions { display: flex; align-items: center; gap: 12px; }
 button {
@@ -91,12 +112,20 @@ button.ghost { background: transparent; }
 .runs { display: flex; flex-direction: column; gap: 10px; }
 .empty { color: var(--muted); font-size: 13px; }
 .run {
-  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px;
 }
 .run-label { font-weight: 600; }
 .run-meta { font-size: 12px; color: var(--muted); }
+.run-config { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.chip { font-size: 11px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; cursor: default; }
+.chip[title] { cursor: help; }
+.run-stat { font-size: 12px; color: var(--muted); margin-top: 6px; }
+.err-count { color: var(--err); }
+.run-main { min-width: 0; }
 .run-side { display: flex; align-items: center; gap: 10px; min-width: 200px; justify-content: flex-end; }
+.run-actions { display: flex; gap: 6px; }
+.run-actions button { padding: 6px 10px; font-size: 13px; }
 .status { font-size: 12px; padding: 2px 9px; border-radius: 999px; text-transform: capitalize; }
 .status.ok { background: rgba(63,185,80,.15); color: var(--ok); }
 .status.run { background: rgba(210,153,34,.15); color: var(--run); }
@@ -123,6 +152,11 @@ button.ghost { background: transparent; }
 .verdict.review { color: var(--run); }
 .verdict.error { color: var(--err); }
 .note { font-size: 12px; color: var(--muted); }
+.shots { display: flex; gap: 10px; margin-top: 10px; }
+.shot { flex: 1; min-width: 0; text-decoration: none; color: var(--muted); }
+.shot span { display: block; font-size: 11px; margin-bottom: 3px; text-transform: uppercase; letter-spacing: .4px; }
+.shot img { width: 100%; height: 130px; object-fit: cover; object-position: top; border: 1px solid var(--border); border-radius: 6px; background: #fff; display: block; }
+.shot:hover img { border-color: var(--accent); }
 .report-links { display: flex; gap: 14px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
 .report-link { color: var(--accent); font-size: 13px; text-decoration: none; }
 .report-link:hover { text-decoration: underline; }

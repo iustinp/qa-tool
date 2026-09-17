@@ -6,7 +6,8 @@ deployment path (self-hosted local/team server, or cloud). See the repo root
 <pre><code class="language-bash">node webui/server.js
 # then open http://localhost:4321
 </code></pre>
-<p>No dependencies — Node >= 18 only.</p>
+<p>Node >= 18. Uses <code>sharp</code> (an existing project dependency) to generate small
+screenshot thumbnails for the results panel; no other dependencies.</p>
 <h3 id="env-knobs">Env knobs</h3>
 <ul>
 <li><code>WEBUI_PORT</code> — port (default <code>4321</code>).</li>

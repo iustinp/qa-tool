@@ -19,7 +19,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
-const { randomUUID } = require('crypto');
+const { randomUUID, createHash } = require('crypto');
+const sharp = require('sharp'); // already a project dependency (used by the engine)
 
 const PORT = process.env.WEBUI_PORT ? Number(process.env.WEBUI_PORT) : 4321;
 const ENGINE_MODE = (process.env.WEBUI_ENGINE || 'real').toLowerCase(); // "real" | "stub"
@@ -48,13 +49,18 @@ const jobs = new Map();
 const queue = [];
 let runningCount = 0;
 
-function createJob({ label, pairs, mode }) {
+function createJob({ label, pairs, mode, threads, ignoreSource, ignoreTarget, clickSource, clickTarget }) {
   const id = randomUUID();
   const now = Date.now();
   const job = {
     id,
     label: label || `run-${new Date(now).toISOString().slice(0, 19)}`,
     mode: RUN_MODES[mode] ? mode : 'full',
+    threads: Math.min(16, Math.max(1, Number(threads) || 1)),
+    ignoreSource: ignoreSource || [],
+    ignoreTarget: ignoreTarget || [],
+    clickSource: clickSource || [],
+    clickTarget: clickTarget || [],
     status: 'queued',
     stage: 'queued',
     progress: 0,
@@ -106,7 +112,27 @@ function runReal(job) {
     const logPath = path.join(job.runDir, 'engine.log');
     const logStream = fs.createWriteStream(logPath);
 
-    const args = ['index.js', '--csv', csvPath, '--out', outDir, ...RUN_MODES[job.mode]];
+    const args = ['index.js', '--csv', csvPath, '--out', outDir, '--threads', String(job.threads), ...RUN_MODES[job.mode]];
+
+    // If the run has per-side ignore or click selectors, emit a recipe and pass
+    // --recipe. JSON is valid YAML, so we write it without a YAML dependency.
+    if (
+      job.ignoreSource.length ||
+      job.ignoreTarget.length ||
+      job.clickSource.length ||
+      job.clickTarget.length
+    ) {
+      const asRules = (list) => list.map((selector) => ({ selector, reason: 'ui' }));
+      const recipe = {
+        ignoreSource: asRules(job.ignoreSource),
+        ignoreTarget: asRules(job.ignoreTarget),
+        clickSource: asRules(job.clickSource),
+        clickTarget: asRules(job.clickTarget),
+      };
+      const recipePath = path.join(job.runDir, 'recipe.yaml');
+      fs.writeFileSync(recipePath, JSON.stringify(recipe, null, 2));
+      args.push('--recipe', recipePath);
+    }
     touch(job, { status: 'running', stage: 'starting', progress: 1, outDir, logPath });
 
     const child = spawn(process.execPath, args, { cwd: PROJECT_ROOT });
@@ -133,10 +159,13 @@ function runReal(job) {
     child.on('close', (code) => {
       logStream.end();
       if (code === 0) {
+        const { analyzed, loadErrors } = summarizeRun(outDir);
         touch(job, {
           status: 'done',
           stage: 'done',
           progress: 100,
+          analyzed,
+          loadErrors,
           resultsUrl: `/api/runs/${job.id}/results`,
           reportUrl: reportRelUrl(job, 'report.html'),
         });
@@ -218,15 +247,28 @@ function buildResults(job) {
     /* summary may be absent on a failed capture */
   }
   const rows = (summary && summary.results) || [];
-  const pairs = rows.map((r) => ({
-    source: r.sourceUrl,
-    target: r.targetUrl,
-    status: r.captureError ? 'error' : r.missingCount > 0 ? 'review' : 'ok',
-    note: r.captureError
-      ? String(r.captureError).slice(0, 80)
-      : `${r.missingCount ?? 0} missing · ${r.finishedReason || 'done'}`,
-    reviewUrl: r.slug ? reportRelUrl(job, `pairs/${r.slug}/layout-review.html`) : null,
-  }));
+  const pairs = rows.map((r) => {
+    // Thumbnail (small, generated on demand) for the <img>; full PNG for the link.
+    const relOf = (side) => `pairs/${r.slug}/screenshots/${side}-full.png`;
+    const hasShot = (side) => r.slug && fileExists(job, relOf(side));
+    const shot = (side) =>
+      hasShot(side) ? `/api/runs/${job.id}/thumb/${relOf(side)}` : null;
+    const shotFull = (side) => (hasShot(side) ? reportRelUrl(job, relOf(side)) : null);
+    // Per-pair: report whether it loaded/analyzed. Detailed quality (missing,
+    // coverage, layout) lives in the per-pair review — a single aggregate number
+    // here would be misleading across a large run.
+    return {
+      source: r.sourceUrl,
+      target: r.targetUrl,
+      status: r.captureError ? 'error' : 'ok',
+      note: r.captureError ? `load error: ${String(r.captureError).slice(0, 70)}` : 'analyzed',
+      reviewUrl: r.slug ? reportRelUrl(job, `pairs/${r.slug}/layout-review.html`) : null,
+      sourceShot: shot('source'),
+      targetShot: shot('target'),
+      sourceShotFull: shotFull('source'),
+      targetShotFull: shotFull('target'),
+    };
+  });
   return {
     runId: job.id,
     label: job.label,
@@ -238,6 +280,44 @@ function buildResults(job) {
       : null,
     pairs,
   };
+}
+
+// Count pairs analyzed vs. pairs that failed to load (captureError). This is the
+// one run-level aggregate that's genuinely additive across a large run.
+function summarizeRun(outDir) {
+  try {
+    const summary = JSON.parse(fs.readFileSync(path.join(outDir, 'summary.json'), 'utf8'));
+    const rows = summary.results || [];
+    const loadErrors = rows.filter((r) => r.captureError).length;
+    return { analyzed: rows.length - loadErrors, loadErrors };
+  } catch {
+    return { analyzed: null, loadErrors: null };
+  }
+}
+
+// Generate (once) and serve a small top-crop JPEG thumbnail of a run screenshot.
+// Full-page shots are very tall; a ~360px-wide top crop is a light glance, and the
+// full image is one click away. Cached under the run's thumbs/ dir.
+async function serveThumb(res, job, rel) {
+  const clean = decodeURIComponent(rel).replace(/^\/+/, '');
+  const srcPath = path.join(job.outDir, clean);
+  if (!srcPath.startsWith(job.outDir)) return void (res.writeHead(403), res.end('Forbidden'));
+  const cachePath = path.join(job.runDir, 'thumbs', `${createHash('sha1').update(clean).digest('hex')}.jpg`);
+  try {
+    if (!fs.existsSync(cachePath)) {
+      if (!fs.existsSync(srcPath)) return void (res.writeHead(404), res.end('Not found'));
+      fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+      await sharp(srcPath)
+        .resize(360, 480, { fit: 'cover', position: 'top' })
+        .jpeg({ quality: 72 })
+        .toFile(cachePath);
+    }
+    res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'max-age=86400' });
+    fs.createReadStream(cachePath).pipe(res);
+  } catch (e) {
+    res.writeHead(500);
+    res.end(String((e && e.message) || e));
+  }
 }
 
 function reportRelUrl(job, rel) {
@@ -283,6 +363,11 @@ function readBody(req) {
     });
     req.on('error', reject);
   });
+}
+// Ignore selectors arrive as an array of strings or a newline-delimited string.
+function parseSelectors(input) {
+  const list = Array.isArray(input) ? input : String(input || '').split(/\r?\n/);
+  return list.map((s) => String(s).trim()).filter(Boolean);
 }
 // Parse a pasted/uploaded CSV of `source,target` (comma or semicolon), skip header.
 function parsePairs(csvText) {
@@ -351,7 +436,16 @@ const server = http.createServer(async (req, res) => {
       if (!pairs.length) {
         return sendJson(res, 400, { error: 'No valid source,target pairs found.' });
       }
-      const job = createJob({ label: body.label, pairs, mode: body.mode });
+      const job = createJob({
+        label: body.label,
+        pairs,
+        mode: body.mode,
+        threads: body.threads,
+        ignoreSource: parseSelectors(body.ignoreSource),
+        ignoreTarget: parseSelectors(body.ignoreTarget),
+        clickSource: parseSelectors(body.clickSource),
+        clickTarget: parseSelectors(body.clickTarget),
+      });
       return sendJson(res, 201, { jobId: job.id, status: job.status });
     }
 
@@ -366,7 +460,8 @@ const server = http.createServer(async (req, res) => {
     if (runMatch && req.method === 'GET') {
       const job = jobs.get(runMatch[1]);
       if (!job) return sendJson(res, 404, { error: 'Run not found' });
-      const { pairs, runDir, outDir, logPath, pid, ...rest } = job;
+      // Single-run detail includes pairs so the UI can reload the run into the form.
+      const { runDir, outDir, logPath, pid, logTail, ...rest } = job;
       return sendJson(res, 200, rest);
     }
 
@@ -378,6 +473,15 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 409, { error: 'Run not finished', status: job.status });
       }
       return sendJson(res, 200, buildResults(job));
+    }
+
+    // Serve a small cached thumbnail of a run screenshot (keeps the results panel
+    // light — the full-size PNGs are 1-2MB each and janked the page).
+    const thumbMatch = pathname.match(/^\/api\/runs\/([^/]+)\/thumb\/(.*)$/);
+    if (thumbMatch && req.method === 'GET') {
+      const job = jobs.get(thumbMatch[1]);
+      if (!job || !job.outDir) return void (res.writeHead(404), res.end('Not found'));
+      return void serveThumb(res, job, thumbMatch[2]);
     }
 
     // Serve a real run folder's artifacts (report.html, per-pair review, screenshots).

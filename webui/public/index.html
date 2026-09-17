@@ -18,7 +18,7 @@
   <main class="layout">
     <!-- New run -->
     <section class="panel" aria-labelledby="newRunTitle">
-      <h2 id="newRunTitle">New run</h2>
+      <h2 id="newRunTitle" title="Clear the form" role="button" tabindex="0">New run</h2>
       <label class="field">
         <span>Label <em>(optional)</em></span>
         <input id="labelInput" type="text" placeholder="e.g. usta-foundation" />
@@ -29,17 +29,54 @@
           <button type="button" id="browseBtn" class="link-btn">Browse CSV…</button>
           <input id="csvFile" type="file" accept=".csv,text/csv" hidden multiple />
         </span>
-        <textarea id="pairsInput" rows="7"
+        <textarea id="pairsInput" rows="7" wrap="off"
           placeholder="https://old.example.com/page,https://new.example.com/page"></textarea>
       </label>
-      <label class="field">
-        <span>Mode</span>
-        <select id="modeSelect">
-          <option value="full">Full (screening + AI)</option>
-          <option value="text-only" selected>Text-only (no AI)</option>
-          <option value="screening-only">Screening-only (no AI)</option>
-        </select>
-      </label>
+      <div class="field-row">
+        <label class="field">
+          <span>Mode</span>
+          <select id="modeSelect">
+            <option value="full">Full (screening + AI)</option>
+            <option value="text-only" selected>Text-only (no AI)</option>
+            <option value="screening-only">Screening-only (no AI)</option>
+          </select>
+        </label>
+        <label class="field threads-field">
+          <span>Threads</span>
+          <input id="threadsInput" type="number" min="1" max="16" step="1" value="1" />
+        </label>
+      </div>
+
+      <details class="ignore-box">
+        <summary>Ignore known issues (CSS selectors)</summary>
+        <p class="hint">One CSS selector per line. Matched regions stay visible but are
+          excluded from comparison and marked with a red hatch, so known-issue regions
+          don't affect the result — and you can see exactly what was ignored.</p>
+        <label class="field">
+          <span>Ignore on <strong>source</strong></span>
+          <textarea id="ignoreSource" rows="3" placeholder=".legacy-banner&#10;#old-promo"></textarea>
+        </label>
+        <label class="field">
+          <span>Ignore on <strong>target</strong></span>
+          <textarea id="ignoreTarget" rows="3" placeholder=".known-broken-block"></textarea>
+        </label>
+      </details>
+
+      <details class="ignore-box">
+        <summary>Click if present (CSS selectors)</summary>
+        <p class="hint">One CSS selector per line. If the element is on the page at load,
+          its first visible match is clicked before capture — e.g. a cookie
+          <strong>Accept</strong> or <strong>Deny</strong> button. Runs even without AI.</p>
+        <label class="field">
+          <span>Click on <strong>source</strong></span>
+          <textarea id="clickSource" rows="2" placeholder="#onetrust-accept-btn-handler"></textarea>
+        </label>
+        <label class="field">
+          <span>Click on <strong>target</strong></span>
+          <textarea id="clickTarget" rows="2" placeholder=".cookie-accept"></textarea>
+        </label>
+      </details>
+
       <div class="actions">
         <button id="startBtn" class="primary">Start run</button>
         <span id="startMsg" class="msg"></span>

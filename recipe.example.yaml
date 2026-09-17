@@ -13,12 +13,38 @@ site:
 profiles: [desktop, mobile]
 
 # Excluded from ALL comparison (content + visual) — third-party chrome that isn't
-# part of the migration.
+# part of the migration. `ignore` applies to BOTH sides (same selector on source
+# and target); use it for shared chrome like cookie banners.
 ignore:
   - selector: "#onetrust-banner-sdk"
     reason: cookie-consent
   - selector: ".live-chat-widget"
     reason: third-party-widget
+
+# Per-side ignores — the matched element STAYS in place (layout unchanged) but its
+# subtree is excluded from comparison (pears + text), and a semi-transparent
+# red/white diagonal hatch is painted over it so you can see exactly what the
+# selector caught and why it isn't compared. Use these for KNOWN ISSUES you don't
+# want to affect run correctness. Source and target DOMs differ, so the selectors
+# differ — hence two separate lists.
+ignoreSource:
+  - selector: ".legacy-promo"
+    reason: known-issue-not-migrated
+ignoreTarget:
+  - selector: ".known-broken-block"
+    reason: known-issue-tracked-separately
+
+# Click-if-present — before capture, if the element is on the page its first
+# visible match is clicked. Use for consent/cookie buttons (Accept OR Deny — you
+# choose the scenario to test), "enter site" gates, etc. Runs deterministically,
+# even in text-only mode (unlike the AI/vision overlay dismissal). Per-side, since
+# source and target selectors differ.
+clickSource:
+  - selector: "#onetrust-accept-btn-handler"
+    reason: accept-cookies
+clickTarget:
+  - selector: ".cookie-consent__accept"
+    reason: accept-cookies
 
 # Excluded from VISUAL diff only (content still audited) — regions that legitimately
 # change on their own and would cause false visual diffs.

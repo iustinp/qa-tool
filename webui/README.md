@@ -11,7 +11,8 @@ node webui/server.js
 # then open http://localhost:4321
 ```
 
-No dependencies — Node >= 18 only.
+Node >= 18. Uses `sharp` (an existing project dependency) to generate small
+screenshot thumbnails for the results panel; no other dependencies.
 
 ### Env knobs
 
