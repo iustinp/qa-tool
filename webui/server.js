@@ -73,6 +73,7 @@ function createJob({ label, pairs, mode, threads, ignoreSource, ignoreTarget, cl
     logTail: '',
   };
   jobs.set(id, job);
+  persistJob(job);
   queue.push(id);
   pump();
   return job;
@@ -80,6 +81,65 @@ function createJob({ label, pairs, mode, threads, ignoreSource, ignoreTarget, cl
 
 function touch(job, patch) {
   Object.assign(job, patch, { updatedAt: Date.now() });
+}
+
+// --- Run persistence: survive server restarts ---------------------------------
+// Runs are kept in memory for liveness but mirrored to <runDir>/job.json so the
+// history (and the Load button) survive a restart. Ephemeral fields (paths, the
+// child pid, the log tail) are not stored — they're recomputed on load.
+const PERSIST_FIELDS = [
+  'id', 'label', 'mode', 'threads',
+  'ignoreSource', 'ignoreTarget', 'clickSource', 'clickTarget',
+  'status', 'stage', 'progress', 'pairCount', 'pairs',
+  'createdAt', 'updatedAt', 'error', 'resultsUrl', 'reportUrl', 'analyzed', 'loadErrors',
+];
+
+function persistJob(job) {
+  try {
+    fs.mkdirSync(job.runDir, { recursive: true });
+    const data = {};
+    for (const k of PERSIST_FIELDS) if (job[k] !== undefined) data[k] = job[k];
+    fs.writeFileSync(path.join(job.runDir, 'job.json'), JSON.stringify(data));
+  } catch {
+    /* persistence is best-effort — never break a run over it */
+  }
+}
+
+function loadPersistedJobs() {
+  let ids = [];
+  try {
+    ids = fs.readdirSync(RUNS_DIR);
+  } catch {
+    return;
+  }
+  let restored = 0;
+  for (const id of ids) {
+    const runDir = path.join(RUNS_DIR, id);
+    let data;
+    try {
+      data = JSON.parse(fs.readFileSync(path.join(runDir, 'job.json'), 'utf8'));
+    } catch {
+      continue; // no metadata (old run, or mid-write) — skip
+    }
+    const job = {
+      ...data,
+      runDir,
+      outDir: path.join(runDir, 'out'),
+      logPath: path.join(runDir, 'engine.log'),
+      logTail: '',
+    };
+    // A run mid-flight when the server stopped can't resume — mark it interrupted.
+    if (job.status !== 'done' && job.status !== 'error') {
+      Object.assign(job, {
+        status: 'error',
+        stage: 'interrupted',
+        error: 'Interrupted by a server restart.',
+      });
+    }
+    jobs.set(job.id, job);
+    restored += 1;
+  }
+  if (restored) console.log(`[webui] restored ${restored} run(s) from disk`);
 }
 
 // Start queued jobs up to the concurrency cap.
@@ -94,6 +154,7 @@ function pump() {
       .then(() => runner(job))
       .catch((err) => touch(job, { status: 'error', stage: 'error', error: String(err) }))
       .finally(() => {
+        persistJob(job); // record the terminal state (done/error + analyzed/urls)
         runningCount -= 1;
         pump();
       });
@@ -507,6 +568,8 @@ const server = http.createServer(async (req, res) => {
     sendJson(res, 500, { error: String(err && err.message ? err.message : err) });
   }
 });
+
+loadPersistedJobs(); // restore run history from disk before accepting requests
 
 server.listen(PORT, () => {
   // eslint-disable-next-line no-console
