@@ -67,7 +67,7 @@ function hostOf(u) {
 }
 
 function createJob({
-  label, pairs, mode, threads, recipe, ignoreSource, ignoreTarget, clickSource, clickTarget,
+  label, pairs, mode, threads, recipe, resolutions, ignoreSource, ignoreTarget, clickSource, clickTarget,
 }) {
   const id = randomUUID();
   const now = Date.now();
@@ -82,6 +82,7 @@ function createJob({
     recipe: recipe || null, // name of the site recipe it was run with (provenance)
     site: hosts.length === 1 ? hosts[0] : hosts[0] || null, // grouping key
     sites: hosts, // all distinct source hosts (usually one)
+    resolutions: Array.isArray(resolutions) ? resolutions : [], // [{width, ua}] — analyze at these widths
     ignoreSource: ignoreSource || [],
     ignoreTarget: ignoreTarget || [],
     clickSource: clickSource || [],
@@ -113,7 +114,7 @@ function touch(job, patch) {
 // history (and the Load button) survive a restart. Ephemeral fields (paths, the
 // child pid, the log tail) are not stored — they're recomputed on load.
 const PERSIST_FIELDS = [
-  'id', 'label', 'mode', 'threads', 'recipe', 'site', 'sites',
+  'id', 'label', 'mode', 'threads', 'recipe', 'site', 'sites', 'resolutions',
   'ignoreSource', 'ignoreTarget', 'clickSource', 'clickTarget',
   'status', 'stage', 'progress', 'pairCount', 'pairs',
   'createdAt', 'updatedAt', 'error', 'resultsUrl', 'reportUrl', 'analyzed', 'loadErrors',
@@ -255,13 +256,14 @@ function runReal(job) {
 
     const args = ['index.js', '--csv', csvPath, '--out', outDir, '--threads', String(job.threads), ...RUN_MODES[job.mode]];
 
-    // If the run has per-side ignore or click selectors, emit a recipe and pass
-    // --recipe. JSON is valid YAML, so we write it without a YAML dependency.
+    // If the run has per-side ignore/click selectors or resolutions, emit a recipe
+    // and pass --recipe. JSON is valid YAML, so we write it without a YAML dep.
     if (
       job.ignoreSource.length ||
       job.ignoreTarget.length ||
       job.clickSource.length ||
-      job.clickTarget.length
+      job.clickTarget.length ||
+      job.resolutions.length
     ) {
       const asRules = (list) => list.map((selector) => ({ selector, reason: 'ui' }));
       const recipe = {
@@ -270,6 +272,7 @@ function runReal(job) {
         clickSource: asRules(job.clickSource),
         clickTarget: asRules(job.clickTarget),
       };
+      if (job.resolutions.length) recipe.resolutions = job.resolutions;
       const recipePath = path.join(job.runDir, 'recipe.yaml');
       fs.writeFileSync(recipePath, JSON.stringify(recipe, null, 2));
       args.push('--recipe', recipePath);
@@ -509,6 +512,23 @@ function readBody(req) {
     req.on('error', reject);
   });
 }
+// Normalize a resolutions list to [{width, ua}] with valid widths + ua.
+function parseResolutions(input) {
+  if (!Array.isArray(input)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const r of input) {
+    const width = Math.round(Number(r && r.width));
+    if (!Number.isFinite(width) || width < 100 || width > 4000) continue;
+    const ua = r.ua === 'mobile' ? 'mobile' : 'desktop';
+    const key = `${width}-${ua}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ width, ua });
+  }
+  return out;
+}
+
 // Ignore selectors arrive as an array of strings or a newline-delimited string.
 function parseSelectors(input) {
   const list = Array.isArray(input) ? input : String(input || '').split(/\r?\n/);
@@ -535,6 +555,7 @@ function recipeToForm(name, doc) {
     mode: doc.mode || null,
     threads: doc.threads || null,
     site: doc.site || null, // site this recipe is for (drives the runs filter)
+    resolutions: Array.isArray(doc.resolutions) ? doc.resolutions : [],
     ignoreSource: sels(doc.ignoreSource),
     ignoreTarget: sels(doc.ignoreTarget),
     clickSource: sels(doc.clickSource),
@@ -572,6 +593,8 @@ function saveRecipe(body) {
   if (body.mode) doc.mode = body.mode; // UI hints — the engine ignores unknown keys
   if (body.threads) doc.threads = Math.min(16, Math.max(1, Number(body.threads) || 1));
   if (body.site) doc.site = String(body.site).slice(0, 253);
+  const res = parseResolutions(body.resolutions);
+  if (res.length) doc.resolutions = res; // engine reads this to run multi-resolution
   fs.writeFileSync(path.join(RECIPES_DIR, `${name}.yaml`), YAML.stringify(doc));
   return name;
 }
@@ -672,6 +695,7 @@ const server = http.createServer(async (req, res) => {
         mode: body.mode,
         threads: body.threads,
         recipe: body.recipe || null,
+        resolutions: parseResolutions(body.resolutions),
         ignoreSource: parseSelectors(body.ignoreSource),
         ignoreTarget: parseSelectors(body.ignoreTarget),
         clickSource: parseSelectors(body.clickSource),

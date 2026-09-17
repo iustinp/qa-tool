@@ -16,6 +16,7 @@ const { createRunLogger } = require('./lib/run-logger');
 const { initializeClaudeClient, probeBedrockAuth } = require('./lib/claude');
 const { processPair } = require('./lib/pair-worker');
 const { loadRecipe, DEFAULT_RECIPE } = require('./lib/recipe');
+const { buildResolutionProfiles } = require('./lib/profiles');
 const { createCacheStore, isCacheEnabled } = require('./lib/cache-store');
 const { writeScoreReport } = require('./lib/score-report');
 const { writeCustomerReport } = require('./lib/customer-report');
@@ -49,8 +50,7 @@ function textAuditSummaryFields(report) {
   };
 }
 
-function layoutAuditSummaryFields(report) {
-  const l = report.layoutAudit;
+function layoutFields(l) {
   return {
     layoutStatus: l?.status ?? null,
     layoutMatchedCount: l?.matchedCount ?? null,
@@ -68,6 +68,19 @@ function layoutAuditSummaryFields(report) {
     driftYellow: l?.driftYellow ?? null,
     driftRed: l?.driftRed ?? null,
   };
+}
+
+function layoutAuditSummaryFields(report) {
+  return layoutFields(report.layoutAudit);
+}
+
+// Per-resolution layout fields keyed by profile name (null for single-resolution).
+function layoutByProfileFields(report) {
+  const map = report.layoutAuditByProfile;
+  if (!map || Object.keys(map).length < 2) return null;
+  const out = {};
+  for (const [name, l] of Object.entries(map)) out[name] = layoutFields(l);
+  return out;
 }
 
 function contentSummaryFields(report) {
@@ -346,6 +359,16 @@ async function main() {
     }
   }
 
+  // A recipe `resolutions` list (widths + UA) overrides the named profiles: the
+  // pipeline runs once per resolution. Empty => today's single desktop profile.
+  const resolutionProfiles = buildResolutionProfiles(recipe.resolutions);
+  const runProfiles = resolutionProfiles.length ? resolutionProfiles : recipe.profiles;
+  if (resolutionProfiles.length) {
+    console.log(
+      `Resolutions: ${resolutionProfiles.map((p) => `${p.width}${p.ua === 'mobile' ? '(mobile)' : ''}`).join(', ')}`
+    );
+  }
+
   // Persistent vision-result cache. Off unless --cache or PPD_CACHE=1 => parity.
   const cacheEnabled = args.cache != null ? args.cache : isCacheEnabled();
   const cacheStore = createCacheStore({ namespace: 'vision', enabled: cacheEnabled });
@@ -437,7 +460,7 @@ async function main() {
       skipScreening: args.noScreening,
       screeningOnly: args.screeningOnly,
       textOnly: args.textOnly,
-      profiles: recipe.profiles,
+      profiles: runProfiles,
       ignore: recipe.ignore,
       ignoreSource: recipe.ignoreSource,
       ignoreTarget: recipe.ignoreTarget,
@@ -541,6 +564,7 @@ async function main() {
           ...textAuditSummaryFields(r),
           ...contentSummaryFields(r),
           ...layoutAuditSummaryFields(r),
+          layoutByProfile: layoutByProfileFields(r),
         })),
       },
       null,
@@ -550,6 +574,17 @@ async function main() {
 
   console.log(`\nWrote ${summaryJson}`);
 
+  // The resolutions this run analyzed (in order) — drives the report tabs. Null
+  // when there's a single resolution (reports render exactly as before).
+  const resolutionsMeta = resolutionProfiles.length
+    ? resolutionProfiles.map((p) => ({
+        name: p.name,
+        width: p.width,
+        ua: p.ua,
+        label: `${p.width}${p.ua === 'mobile' ? ' · mobile' : ''}`,
+      }))
+    : null;
+
   // Sortable HTML report of every pair + its health scores/components.
   const reportRows = results.map((r) => ({
     slug: r.slug,
@@ -558,15 +593,18 @@ async function main() {
     captureError: r.captureError,
     finishedReason: r.finishedReason,
     ...layoutAuditSummaryFields(r),
+    byProfile: layoutByProfileFields(r), // per-resolution scores for the report tabs
   }));
   const reportPath = writeScoreReport(outDir, reportRows, {
     pairCount: results.length,
     generatedAt: new Date().toISOString(),
+    resolutions: resolutionsMeta,
   });
   console.log(`Wrote ${reportPath}`);
   const customerReportPath = writeCustomerReport(outDir, reportRows, {
     pairCount: results.length,
     generatedAt: new Date().toISOString(),
+    resolutions: resolutionsMeta,
   });
   console.log(`Wrote ${customerReportPath}`);
 

@@ -38,10 +38,10 @@ const API = (() => {
 
   return {
     health: () => request('/api/health'),
-    createRun: ({ label, csv, mode, threads, recipe, ignoreSource, ignoreTarget, clickSource, clickTarget }) =>
+    createRun: ({ label, csv, mode, threads, recipe, resolutions, ignoreSource, ignoreTarget, clickSource, clickTarget }) =>
       request('/api/runs', {
         method: 'POST',
-        body: JSON.stringify({ label, csv, mode, threads, recipe, ignoreSource, ignoreTarget, clickSource, clickTarget }),
+        body: JSON.stringify({ label, csv, mode, threads, recipe, resolutions, ignoreSource, ignoreTarget, clickSource, clickTarget }),
       }),
     listRuns: () => request('/api/runs'),
     getRun: (jobId) => request(`/api/runs/${jobId}`),
@@ -50,6 +50,7 @@ const API = (() => {
     listRecipes: () => request('/api/recipes'),
     saveRecipe: (recipe) =>
       request('/api/recipes', { method: 'POST', body: JSON.stringify(recipe) }),
+    // (recipe payload already includes resolutions when present)
     deleteRecipe: (name) =>
       request(`/api/recipes/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   };
