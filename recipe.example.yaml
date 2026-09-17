@@ -12,6 +12,15 @@ site:
 # Which capture profiles to run the pipeline against (desktop | mobile | tablet).
 profiles: [desktop, mobile]
 
+# Analyze at specific screen widths (overrides `profiles` when set). Each entry is
+# a width + a user-agent class — content can differ by both. `mobile` sends a phone
+# UA + touch so the site serves its mobile content; `desktop` keeps desktop behavior.
+# The pipeline runs once per resolution; reports are tabbed by resolution.
+resolutions:
+  - { width: 1440, ua: desktop }
+  - { width: 768,  ua: mobile }
+  - { width: 375,  ua: mobile }
+
 # Excluded from ALL comparison (content + visual) — third-party chrome that isn't
 # part of the migration. `ignore` applies to BOTH sides (same selector on source
 # and target); use it for shared chrome like cookie banners.
