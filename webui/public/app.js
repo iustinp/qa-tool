@@ -116,8 +116,8 @@
         clickTarget: toLines(els.clickTarget.value),
       });
       els.startMsg.textContent = `Started (${jobId.slice(0, 8)}…)`;
-      els.pairs.value = '';
-      els.label.value = '';
+      // Keep the pairs, label, and ignore/click selectors in place so the run can
+      // be tweaked and resubmitted without re-entering everything.
       await refreshRuns();
       startPolling(jobId);
     } catch (e) {
