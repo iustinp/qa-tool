@@ -24,6 +24,8 @@ node index.js --probe-bedrock
 cd qa-tool
 lsof -ti tcp:4321 | xargs kill; node webui/server.js
 
+Then open http://localhost:4321/ in your browser. 
+
 ## Run CLI
 
 ```bash
