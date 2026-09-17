@@ -112,6 +112,14 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 button.ghost { background: transparent; }
 .msg { font-size: 12px; color: var(--muted); }
 
+.site-filter { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.site-filter:empty { display: none; }
+.fchip {
+  font-size: 12px; padding: 3px 10px; border-radius: 999px; cursor: pointer;
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--muted);
+}
+.fchip:hover { border-color: var(--accent); }
+.fchip.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 .runs { display: flex; flex-direction: column; gap: 10px; }
 .empty { color: var(--muted); font-size: 13px; }
 .run {

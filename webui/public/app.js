@@ -20,6 +20,7 @@
     startBtn: $('#startBtn'),
     startMsg: $('#startMsg'),
     refreshBtn: $('#refreshBtn'),
+    siteFilter: $('#siteFilter'),
     runsList: $('#runsList'),
     results: $('#results'),
     resultsTitle: $('#resultsTitle'),
@@ -29,6 +30,30 @@
 
   // Jobs we are actively polling: jobId -> intervalId
   const polling = new Map();
+
+  // Multi-select site filter (empty set = show all). The full run set is cached so
+  // toggling the filter re-renders without refetching.
+  const siteFilter = new Set();
+  let allRuns = [];
+
+  function hostOf(u) {
+    try {
+      return new URL(u).host;
+    } catch {
+      return null;
+    }
+  }
+  // Source host of the first real pair in the pairs box (a run/recipe's site).
+  function currentSite() {
+    for (const line of els.pairs.value.split('\n')) {
+      const t = line.trim();
+      if (!t) continue;
+      const src = t.split(/[;,]/)[0].trim();
+      if (/^source/i.test(src)) continue;
+      return hostOf(src);
+    }
+    return null;
+  }
 
   function fmtTime(ts) {
     return new Date(ts).toLocaleString();
@@ -67,12 +92,44 @@
     return chips.join('');
   }
 
-  function renderRuns(runs) {
-    if (!runs.length) {
-      els.runsList.innerHTML = '<p class="empty">No runs yet. Start one above.</p>';
+  // Render the multi-select site chips from the distinct sites across all runs.
+  function renderSiteFilter() {
+    const sites = [...new Set(allRuns.map((r) => r.site).filter(Boolean))].sort();
+    for (const s of [...siteFilter]) if (!sites.includes(s)) siteFilter.delete(s); // prune gone sites
+    if (sites.length < 2) {
+      els.siteFilter.innerHTML = ''; // nothing to filter with one site
       return;
     }
-    els.runsList.innerHTML = runs
+    const chip = (label, active, val) =>
+      `<button class="fchip${active ? ' active' : ''}" data-site="${val == null ? '' : escapeHtml(val)}">${escapeHtml(label)}</button>`;
+    els.siteFilter.innerHTML =
+      chip('All', siteFilter.size === 0, null) + sites.map((s) => chip(s, siteFilter.has(s), s)).join('');
+    els.siteFilter.querySelectorAll('.fchip').forEach((b) =>
+      b.addEventListener('click', () => {
+        const site = b.dataset.site;
+        if (!site) siteFilter.clear();
+        else if (siteFilter.has(site)) siteFilter.delete(site);
+        else siteFilter.add(site);
+        renderRuns(allRuns);
+      })
+    );
+  }
+
+  function renderRuns(runs) {
+    allRuns = runs;
+    renderSiteFilter();
+    const shown = siteFilter.size ? runs.filter((r) => r.site && siteFilter.has(r.site)) : runs;
+    // Poll every non-terminal run regardless of the filter (background runs keep updating).
+    runs.forEach((r) => {
+      if (r.status !== 'done' && r.status !== 'error' && !polling.has(r.id)) startPolling(r.id);
+    });
+    if (!shown.length) {
+      els.runsList.innerHTML = runs.length
+        ? '<p class="empty">No runs for the selected site(s).</p>'
+        : '<p class="empty">No runs yet. Start one above.</p>';
+      return;
+    }
+    els.runsList.innerHTML = shown
       .map(
         (r) => `
       <div class="run" data-id="${r.id}">
@@ -104,12 +161,6 @@
       )
       .join('');
 
-    // Keep polling any run that isn't finished.
-    runs.forEach((r) => {
-      if (r.status !== 'done' && r.status !== 'error' && !polling.has(r.id)) {
-        startPolling(r.id);
-      }
-    });
     els.runsList.querySelectorAll('.view-btn').forEach((b) =>
       b.addEventListener('click', () => openResults(b.dataset.id))
     );
@@ -185,6 +236,10 @@
         clickTarget: toLines(els.clickTarget.value),
       });
       els.startMsg.textContent = `Started (${jobId.slice(0, 8)}…)`;
+      // Reveal-on-start: make sure the just-started run's site is visible even if a
+      // different site filter was active. (Empty filter already shows everything.)
+      const site = currentSite();
+      if (site && siteFilter.size && !siteFilter.has(site)) siteFilter.add(site);
       // Keep the pairs, label, and ignore/click selectors in place so the run can
       // be tweaked and resubmitted without re-entering everything.
       await refreshRuns();
@@ -303,6 +358,12 @@
     document.querySelectorAll('.ignore-box').forEach((box) => {
       box.open = [...box.querySelectorAll('textarea')].some((t) => t.value.trim());
     });
+    // Loading a recipe focuses the runs list on its site (if it has one).
+    if (r.site) {
+      siteFilter.clear();
+      siteFilter.add(r.site);
+      renderRuns(allRuns);
+    }
   }
   els.recipeSelect.addEventListener('change', () => {
     els.deleteRecipeBtn.hidden = !els.recipeSelect.value;
@@ -322,6 +383,7 @@
         name: name.trim(),
         mode: els.modeSelect.value,
         threads: Math.max(1, parseInt(els.threads.value, 10) || 1),
+        site: currentSite(),
         ignoreSource: toLines(els.ignoreSource.value),
         ignoreTarget: toLines(els.ignoreTarget.value),
         clickSource: toLines(els.clickSource.value),

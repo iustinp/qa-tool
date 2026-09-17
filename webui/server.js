@@ -23,7 +23,11 @@ const { randomUUID, createHash } = require('crypto');
 const sharp = require('sharp'); // already a project dependency (used by the engine)
 const YAML = require('yaml'); // already a project dependency (used by lib/recipe.js)
 
-const PORT = process.env.WEBUI_PORT ? Number(process.env.WEBUI_PORT) : 4321;
+const CLI_PORT = (() => {
+  const i = process.argv.indexOf('--port');
+  return i >= 0 && process.argv[i + 1] ? Number(process.argv[i + 1]) : null;
+})();
+const PORT = CLI_PORT || (process.env.WEBUI_PORT ? Number(process.env.WEBUI_PORT) : 4321);
 const ENGINE_MODE = (process.env.WEBUI_ENGINE || 'real').toLowerCase(); // "real" | "stub"
 const MAX_CONCURRENT = process.env.WEBUI_MAX_CONCURRENT
   ? Math.max(1, Number(process.env.WEBUI_MAX_CONCURRENT))
@@ -471,6 +475,7 @@ function recipeToForm(name, doc) {
     name,
     mode: doc.mode || null,
     threads: doc.threads || null,
+    site: doc.site || null, // site this recipe is for (drives the runs filter)
     ignoreSource: sels(doc.ignoreSource),
     ignoreTarget: sels(doc.ignoreTarget),
     clickSource: sels(doc.clickSource),
@@ -507,6 +512,7 @@ function saveRecipe(body) {
   };
   if (body.mode) doc.mode = body.mode; // UI hints — the engine ignores unknown keys
   if (body.threads) doc.threads = Math.min(16, Math.max(1, Number(body.threads) || 1));
+  if (body.site) doc.site = String(body.site).slice(0, 253);
   fs.writeFileSync(path.join(RECIPES_DIR, `${name}.yaml`), YAML.stringify(doc));
   return name;
 }
