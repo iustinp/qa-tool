@@ -33,6 +33,13 @@ const pears = loadPears(pearsDir);
 if (!pears.length) { console.error(`no pears under ${pearsDir}`); process.exit(1); }
 const { keyBucket } = classifyDescriptors(pears);
 
+const store = loadStore(storePath);
+// Classify the map WITH the store when it has learned types, because detection (scope.js) and the UI
+// export both classify with the store — its band-merges shift y0, so a store-less map here would mint
+// ids that don't match the corrections' ids (they'd all skip). Cold start (empty store) is identical
+// to store-less, so this is safe. Also lets align.js's auto-correction ids resolve.
+const mapOpts = (store && store.types && Object.keys(store.types).length) ? { store } : {};
+
 // id -> band geometry + page (ids reproduce the export's idOf = basename(dir)_round(y0))
 const map = {};
 for (const pg of pears) {
@@ -42,12 +49,10 @@ for (const pg of pears) {
   if (fs.existsSync(shot)) { const b = fs.readFileSync(shot); pngW = b.readUInt32BE(16); pngH = b.readUInt32BE(20); }
   const dpr = pg.dpr || 1;
   const pageW = Math.max(100, ...pg.nodes.map((n) => n.x + n.w), pngW / dpr);
-  for (const b of classifyPage(pg, keyBucket)) {
+  for (const b of classifyPage(pg, keyBucket, mapOpts)) {
     map[`${slug}_${Math.round(b.y0)}`] = { y0: b.y0, y1: b.y1, nodes: pg.nodes, pageW, pageWcss: pngW / dpr || pageW, pageHcss: pngH / dpr || Math.max(...pg.nodes.map((n) => n.y + n.h)) };
   }
 }
-
-const store = loadStore(storePath);
 const before = scoreStore(store);
 let applied = 0, skipped = 0;
 const tally = { correct: 0, reassign: 0, new: 0, fragment: 0, split: 0, notblock: 0, region: 0 };
