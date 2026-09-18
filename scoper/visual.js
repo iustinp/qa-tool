@@ -12,6 +12,7 @@
 const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
+const { detectCutlines } = require('./cutlines');
 
 // Correction vocabulary — the (rough) EDS block palette. The typing layer / block catalog refines this.
 const VOCAB = ['Cards', 'Columns', 'Hero', 'Carousel', 'Accordion', 'Tabs', 'Gallery',
@@ -49,6 +50,29 @@ async function buildVisual(inv, opts = {}) {
     return `fulls/${slug}.jpg`;
   }
 
+  // Every BLOCK band per page (all types, uncapped), for the modal's full-page segmentation view:
+  // a region drawn over several of these "claims" them, so the reviewer sees exactly what they touch.
+  // Plus screenshot cut-line candidates per page (gated) — the DOM-free "where to cut" signal, drawn
+  // inside a band being corrected and used to snap region edges (see the split flow in the client).
+  const pageBands = {};
+  const pageCuts = {};
+  const pngHBySlug = {};
+  const cutGate = (c) => c.strength >= 18 || c.cov >= 0.55; // strength OR coverage (asymmetric heroes read low cov)
+  for (const t of inv) {
+    for (const o of t.occurrences) {
+      const slug = path.basename(o.dir);
+      const shot = path.join(o.dir, 'screenshots', 'source-full.png');
+      if (pngHBySlug[slug] === undefined) {
+        try { pngHBySlug[slug] = (await sharp(shot).metadata()).height; } catch { pngHBySlug[slug] = 0; }
+        try { pageCuts[slug] = (await detectCutlines(shot)).filter(cutGate).map((c) => ({ y: +c.y.toFixed(4), strength: c.strength, cov: c.cov })); } catch { pageCuts[slug] = []; }
+      }
+      const pngH = pngHBySlug[slug];
+      if (!pngH) continue;
+      const dpr = o.dpr || 1;
+      (pageBands[slug] = pageBands[slug] || []).push({ id: idOf(o), top: +((o.y0 * dpr) / pngH).toFixed(4), bot: +((o.y1 * dpr) / pngH).toFixed(4), type: t.subtype });
+    }
+  }
+
   const cols = [];
   for (const t of inv) {
     const items = [];
@@ -81,7 +105,7 @@ async function buildVisual(inv, opts = {}) {
     cols.push({ type: t.subtype, pages: t.pages, instances: t.instances, signature: t.signature, items, total: t.occurrences.length });
   }
 
-  const opt = ['<option value="">— correct —</option>', '<option value="__fragment__">⧉ Fragment of a larger block</option>', '<option value="__new__">➕ New block type…</option>']
+  const opt = ['<option value="">— untouched (no judgement) —</option>', '<option value="__ok__">✓ Correct (confirm this type)</option>', '<option value="__fragment__">⧉ Fragment of a larger block</option>', '<option value="__split__">⊟ Over-fused (contains multiple blocks)</option>', '<option value="__new__">➕ New block type…</option>']
     .concat(VOCAB.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`)).join('');
   const fadePct = (f) => (Math.max(0, Math.min(1, f)) * 100).toFixed(1);
   const colHtml = cols.map((c) => `
@@ -119,6 +143,7 @@ async function buildVisual(inv, opts = {}) {
     #export{background:#1a9e6a;color:#fff;border-color:#158a5c}
     #analyze[disabled]{opacity:.45;cursor:not-allowed}
     #status{color:#666;font-size:12px}
+    #status.learned{color:#127a4e;font-weight:600;background:#e3f6ec;padding:4px 8px;border-radius:5px}
     .board{display:flex;align-items:flex-start;gap:14px;padding:14px;overflow-x:auto;min-height:80vh}
     .col{flex:0 0 500px;background:#fff;border:1px solid #e0e0e0;border-radius:8px}
     .col>header{background:#fafbfc;border-bottom:1px solid #eee;padding:10px 12px;border-radius:8px 8px 0 0}
@@ -130,6 +155,8 @@ async function buildVisual(inv, opts = {}) {
     .inst.flagged{border-color:#e06a00;box-shadow:0 0 0 2px rgba(224,106,0,.25)}
     .inst.newtype{border-color:#6a3fd0;box-shadow:0 0 0 2px rgba(106,63,208,.22)}
     .inst.fragment{border-color:#0f9aa8;box-shadow:0 0 0 2px rgba(15,154,168,.22)}
+    .inst.ok{border-color:#1a9e6a;box-shadow:0 0 0 2px rgba(26,158,106,.22)}
+    .inst.split{border-color:#c0663d;box-shadow:0 0 0 2px rgba(192,102,61,.25)}
     .crop{position:relative;cursor:zoom-in;border:1px solid #eee;border-radius:4px;overflow:hidden;background:#fafafa}
     .crop img{width:100%;display:block}
     .fade{position:absolute;left:0;right:0;background:rgba(247,248,250,.66);pointer-events:none}
@@ -158,6 +185,12 @@ async function buildVisual(inv, opts = {}) {
     #mboxes{position:absolute;inset:0}
     .mband{position:absolute;border:2px solid #17c1d6;background:rgba(23,193,214,.14);pointer-events:none}
     .mband .lbl{position:absolute;top:-18px;left:0;background:#17c1d6;color:#083;font:700 10px ui-monospace;color:#003;padding:0 4px;border-radius:3px}
+    .mband.sib{border:1px dashed #b9bec6;background:rgba(150,155,165,.07)}
+    .mband.sib .lbl{background:#e7e9ee;color:#555}
+    .mband.sib.claimed{border-color:#e06a00;background:rgba(224,106,0,.10)}
+    .mband.sib.claimed .lbl{background:#e06a00;color:#fff}
+    .mcut{position:absolute;left:0;width:100%;height:0;border-top:2px dashed #16a34a;pointer-events:none}
+    .mcut .clbl{position:absolute;right:0;top:-16px;background:#16a34a;color:#fff;font:700 10px ui-monospace;padding:0 4px;border-radius:3px}
     .rbox{position:absolute;border:2px solid #e06a00;background:rgba(224,106,0,.12)}
     .rbox.sel{border-color:#6a3fd0;background:rgba(106,63,208,.16)}
     .rbox .rlbl{position:absolute;top:-17px;left:0;background:#e06a00;color:#fff;font:700 10px ui-monospace;padding:0 4px;border-radius:3px;white-space:nowrap}
@@ -183,7 +216,13 @@ async function buildVisual(inv, opts = {}) {
           .catch(function(e){ b.disabled=false; b.textContent='▶ Analyze corrections'; alert(String(e)); });
       };
       function pollAnalyze(id,b){ fetch('/api/scoper/runs/'+id).then(function(r){return r.json();}).then(function(j){
-        if(j.status==='done'){ b.textContent='Reloading…'; window.location = j.visualUrl; }
+        if(j.status==='done'){
+          var s=document.getElementById('status');
+          s.textContent = j.summary || 'Learned. View the updated inventory.';
+          s.className = 'learned';
+          b.disabled=false; b.textContent='✓ View updated inventory →';
+          b.onclick=function(){ window.location = j.visualUrl; };
+        }
         else if(j.status==='error'){ b.disabled=false; b.textContent='▶ Analyze corrections'; alert('Analyze failed: '+(j.error||'')); }
         else { b.textContent='Analyzing… '+(j.stage||''); setTimeout(function(){ pollAnalyze(id,b); },800); } }); }`
     : `document.getElementById('analyze').onclick = function(){
@@ -198,21 +237,23 @@ async function buildVisual(inv, opts = {}) {
     var KEY = 'ppd-scoper-corrections-${label}';
     var VOCAB = ${JSON.stringify(VOCAB)};
     var CORPUS = ${JSON.stringify(corpus)};
+    var PAGEBANDS = ${JSON.stringify(pageBands)};
+    var PAGECUTS = ${JSON.stringify(pageCuts)};
     var store = JSON.parse(localStorage.getItem(KEY) || '{}');
     var save = function(){ localStorage.setItem(KEY, JSON.stringify(store)); setStatus(); };
     function setStatus(){ document.getElementById('status').textContent = Object.keys(store).length + ' corrections stored'; }
     function ent(id){ return store[id] || (store[id] = {}); }
     function clean(id){ var e = store[id]; if (e && !e.type && !(e.regions && e.regions.length)) delete store[id]; }
-    function optionsHtml(sel){ var h = '<option value="">— set type —</option><option value="__fragment__"'+('__fragment__'===sel?' selected':'')+'>⧉ Fragment of a larger block</option><option value="__new__"'+('__new__'===sel?' selected':'')+'>➕ New block type…</option>'; for (var i=0;i<VOCAB.length;i++){ h += '<option value="'+VOCAB[i]+'"'+(VOCAB[i]===sel?' selected':'')+'>'+VOCAB[i]+'</option>'; } return h; }
+    function optionsHtml(sel){ var h = '<option value="">— untouched (no judgement) —</option><option value="__ok__"'+('__ok__'===sel?' selected':'')+'>✓ Correct (confirm this type)</option><option value="__fragment__"'+('__fragment__'===sel?' selected':'')+'>⧉ Fragment of a larger block</option><option value="__split__"'+('__split__'===sel?' selected':'')+'>⊟ Over-fused (contains multiple blocks)</option><option value="__new__"'+('__new__'===sel?' selected':'')+'>➕ New block type…</option>'; for (var i=0;i<VOCAB.length;i++){ h += '<option value="'+VOCAB[i]+'"'+(VOCAB[i]===sel?' selected':'')+'>'+VOCAB[i]+'</option>'; } return h; }
 
     // ---- main-page instance sync ----
     function renderInst(inst){
       var id = inst.dataset.id, e = store[id] || {};
       var sel = inst.querySelector('select.fix');
       sel.value = e.type || '';
-      var isNew = e.type === '__new__', isFrag = e.type === '__fragment__', has = !!e.type;
-      var isType = has && !isNew && !isFrag;
-      inst.querySelector('.detail').style.display = has ? 'flex' : 'none';
+      var isNew = e.type === '__new__', isFrag = e.type === '__fragment__', isSplit = e.type === '__split__', isOk = e.type === '__ok__', has = !!e.type;
+      var isType = has && !isNew && !isFrag && !isSplit && !isOk;
+      inst.querySelector('.detail').style.display = (has && !isOk) ? 'flex' : 'none';
       inst.querySelector('.newfields').style.display = isNew ? 'flex' : 'none';
       inst.querySelector('.reason').value = e.reason || '';
       inst.querySelector('.newname').value = e.newName || '';
@@ -220,14 +261,17 @@ async function buildVisual(inv, opts = {}) {
       inst.classList.toggle('flagged', isType && e.type !== inst.dataset.col);
       inst.classList.toggle('newtype', isNew);
       inst.classList.toggle('fragment', isFrag);
+      inst.classList.toggle('split', isSplit);
+      inst.classList.toggle('ok', isOk);
       var nr = (e.regions && e.regions.length) || 0, parts = [];
-      if (isFrag) parts.push('⧉ fragment'); else if (isNew) parts.push('➕ ' + (e.newName || 'new type')); else if (isType) parts.push('→ ' + e.type);
+      if (isFrag) parts.push('⧉ fragment'); else if (isSplit) parts.push('⊟ over-fused'); else if (isNew) parts.push('➕ ' + (e.newName || 'new type')); else if (isOk) parts.push('✓ confirmed'); else if (isType) parts.push('→ ' + e.type);
       if (nr) parts.push('✎ ' + nr + ' region' + (nr > 1 ? 's' : ''));
       inst.querySelector('.badge').textContent = parts.join(' · ');
     }
     function saveBaseFromInst(inst){
       var id = inst.dataset.id, e = ent(id), v = inst.querySelector('select.fix').value;
       e.url = inst.dataset.url; e.was = inst.dataset.col;
+      delete e._auto; delete e._via; // an explicit edit here is the user's own; don't let a region re-claim it
       if (v) { e.type = v; e.reason = inst.querySelector('.reason').value.trim();
         if (v === '__new__'){ e.newName = inst.querySelector('.newname').value.trim(); e.characteristics = inst.querySelector('.newchar').value.trim(); } }
       else { delete e.type; delete e.reason; delete e.newName; delete e.characteristics; }
@@ -267,8 +311,52 @@ async function buildVisual(inv, opts = {}) {
       renderRegions();
       modal.style.display = 'block';
     }
+    function slugOf(id){ return id.replace(/_\\d+$/, ''); }
+    function siblingBands(){ return (PAGEBANDS[slugOf(M.id)] || []); }
+    function regionsCover(top, bot){ // does any drawn region cover >50% of [top,bot]?
+      var e = store[M.id], rs = (e && e.regions) || [];
+      for (var i=0;i<rs.length;i++){ var r=rs[i]; var ov=Math.min(bot,r.y+r.h)-Math.max(top,r.y); if (ov > 0.5*Math.max(0.0001,bot-top)) return true; }
+      return false;
+    }
+    // A region that covers sibling bands CLAIMS them as fragments of the same block (learning signal),
+    // so one correction teaches the whole split. Only touches empty or previously-auto siblings; a band
+    // the user judged themselves is left alone; releasing the region un-claims them.
+    function syncClaims(){
+      siblingBands().forEach(function(b){
+        if (b.id === M.id) return; // the clicked band carries the region + its own fragment verdict
+        var e = store[b.id], covered = regionsCover(b.top, b.bot);
+        if (covered){ if (!e || !e.type || e._auto){ store[b.id] = { type:'__fragment__', was:b.type, url:M.inst.dataset.url, _auto:true, _via:M.id }; } }
+        else if (e && e._auto && e._via === M.id){ delete store[b.id]; }
+      });
+      save();
+    }
+    // Screenshot cut-line candidates, SCOPED to the band being corrected (only those strictly inside
+    // it) — the DOM-free "where to cut" proposals for an over-fused band.
+    function bandCuts(){
+      var bt = parseFloat(M.inst.dataset.bandtop)||0, bb = parseFloat(M.inst.dataset.bandbot)||0;
+      return (PAGECUTS[slugOf(M.id)]||[]).filter(function(c){ return c.y > bt + 0.004 && c.y < bb - 0.004; });
+    }
+    // Snap a y (0..1 of page) to the nearest proposed cut or the band edges, within a small tolerance,
+    // so the reviewer doesn't have to draw precisely on the seam.
+    function snapY(y){
+      var bt = parseFloat(M.inst.dataset.bandtop)||0, bb = parseFloat(M.inst.dataset.bandbot)||0;
+      var targets = bandCuts().map(function(c){ return c.y; }).concat([bt, bb]);
+      var best = y, bd = 0.015;
+      targets.forEach(function(t){ var d = Math.abs(t - y); if (d < bd){ bd = d; best = t; } });
+      return best;
+    }
     function drawBoxes(){
       boxes.innerHTML = '';
+      // 1) every other block band on the page, faded — so the reviewer sees the full segmentation
+      siblingBands().forEach(function(b){
+        if (b.id === M.id) return;
+        var claimed = regionsCover(b.top, b.bot);
+        var s = document.createElement('div'); s.className = 'mband sib' + (claimed ? ' claimed' : '');
+        s.style.left='0'; s.style.width='100%'; s.style.top=(b.top*100)+'%'; s.style.height=((b.bot-b.top)*100)+'%';
+        s.innerHTML = '<span class="lbl">'+b.type+(claimed?' · claimed':'')+'</span>';
+        boxes.appendChild(s);
+      });
+      // 2) the clicked band (cyan)
       var bt = parseFloat(M.inst.dataset.bandtop)||0, bb = parseFloat(M.inst.dataset.bandbot)||0;
       var band = document.createElement('div'); band.className='mband';
       band.style.left='0'; band.style.width='100%'; band.style.top=(bt*100)+'%'; band.style.height=((bb-bt)*100)+'%';
@@ -280,6 +368,13 @@ async function buildVisual(inv, opts = {}) {
         d.style.left=(r.x*100)+'%'; d.style.top=(r.y*100)+'%'; d.style.width=(r.w*100)+'%'; d.style.height=(r.h*100)+'%';
         d.innerHTML='<span class="rlbl">'+(r.type||'(unset)')+'</span>';
         d.addEventListener('mousedown', function(ev){ ev.stopPropagation(); M.sel=i; drawBoxes(); renderRegions(); });
+        boxes.appendChild(d);
+      });
+      // 4) proposed cut lines inside this band (screenshot seams) — dashed green, drag/snap to them
+      bandCuts().forEach(function(c){
+        var d = document.createElement('div'); d.className='mcut';
+        d.style.top=(c.y*100)+'%';
+        d.innerHTML='<span class="clbl">cut? · T'+Math.round(c.strength)+'</span>';
         boxes.appendChild(d);
       });
     }
@@ -311,7 +406,7 @@ async function buildVisual(inv, opts = {}) {
         el.querySelector('.rr').oninput = function(){ r.reason = this.value.trim(); save(); };
         var rn = el.querySelector('.rn'); if (rn) rn.oninput = function(){ r.newName = this.value.trim(); save(); };
         var rc = el.querySelector('.rc'); if (rc) rc.oninput = function(){ r.characteristics = this.value.trim(); save(); };
-        el.querySelector('.del').onclick = function(){ e.regions.splice(i,1); if(!e.regions.length) delete e.regions; clean(M.id); M.sel=-1; save(); renderRegions(); drawBoxes(); };
+        el.querySelector('.del').onclick = function(){ e.regions.splice(i,1); if(!e.regions.length) delete e.regions; clean(M.id); M.sel=-1; syncClaims(); renderRegions(); drawBoxes(); };
       });
     }
     // draw a new rectangle by dragging on the page
@@ -336,14 +431,23 @@ async function buildVisual(inv, opts = {}) {
       if (!drag) return;
       var d = drag; drag = null;
       if (d.cur && d.cur.w>0.02 && d.cur.h>0.01){
+        // snap top & bottom edges to the nearest proposed cut / band edge (imprecise drawing is fine)
+        var yTop = snapY(d.cur.y), yBot = snapY(d.cur.y + d.cur.h);
+        if (yBot - yTop > 0.005){ d.cur.y = yTop; d.cur.h = yBot - yTop; }
         var e = ent(M.id); e.url=M.inst.dataset.url; e.was=M.inst.dataset.col; if(!e.regions) e.regions=[];
         e.regions.push({ x:+d.cur.x.toFixed(4), y:+d.cur.y.toFixed(4), w:+d.cur.w.toFixed(4), h:+d.cur.h.toFixed(4), type:'', reason:'' });
-        // auto: a region overlapping the detected band means the tool over-segmented -> mark it a
-        // fragment (only if no verdict was chosen yet; a region drawn elsewhere leaves it alone).
+        // auto-classify the verdict from geometry (only if none chosen; a region elsewhere leaves it):
+        //   region ⊇ band (spans beyond it)  -> the true block is BIGGER  -> ⧉ Fragment (merge)
+        //   band ⊋ region (region sits inside) -> the band is MULTIPLE blocks -> ⊟ Over-fused (split)
         var bt = parseFloat(M.inst.dataset.bandtop)||0, bb = parseFloat(M.inst.dataset.bandbot)||0;
-        var ov = Math.min(bb, d.cur.y + d.cur.h) - Math.max(bt, d.cur.y);
-        if (!e.type && ov / Math.max(0.0001, bb - bt) > 0.4) e.type = '__fragment__';
-        M.sel = e.regions.length-1; save();
+        var ov = Math.max(0, Math.min(bb, d.cur.y + d.cur.h) - Math.max(bt, d.cur.y));
+        var bh = Math.max(0.0001, bb - bt), rh = Math.max(0.0001, d.cur.h);
+        if (!e.type){
+          if (ov / bh > 0.7 && rh > bh * 1.1) e.type = '__fragment__';
+          else if (ov / rh > 0.7 && bh > rh * 1.3) e.type = '__split__';
+          // else ambiguous (region ≈ band, or straddling) -> leave the verdict to the user
+        }
+        M.sel = e.regions.length-1; save(); syncClaims();
       }
       renderRegions(); drawBoxes();
     });`;

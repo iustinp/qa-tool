@@ -57,7 +57,13 @@ function resolvePairs(dir) {
   const storePath = process.env.SCOPER_STORE || path.join(__dirname, 'store.json');
   const store = fs.existsSync(storePath) ? require('./store').loadStore(storePath) : null;
   if (store && Object.keys(store.types || {}).length) console.log(`  typing with learned store (${Object.keys(store.types).length} types) — ${storePath}`);
-  const inv = buildInventory(pears, keyBucket, { store });
+  // Human corrections applied as exact per-corpus overrides (SCOPER_CORRECTIONS = a corrections.json).
+  let overrides = null;
+  if (process.env.SCOPER_CORRECTIONS && fs.existsSync(process.env.SCOPER_CORRECTIONS)) {
+    try { overrides = JSON.parse(fs.readFileSync(process.env.SCOPER_CORRECTIONS, 'utf8')); } catch { /* ignore bad file */ }
+    if (overrides && Object.keys(overrides).length) console.log(`  applying ${Object.keys(overrides).length} correction override(s) — ${process.env.SCOPER_CORRECTIONS}`);
+  }
+  const inv = buildInventory(pears, keyBucket, { store, overrides });
   console.log(`\n${pears.length} pages · ${inv.length} distinct block types  (>=2 pages = the usable ones)\n`);
   console.log('   pp  inst  subtype                    signature');
   console.log('   --  ----  -------                    ---------');
