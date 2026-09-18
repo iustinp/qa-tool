@@ -119,30 +119,33 @@ function alignCorpus(corpusDir, opts = {}) {
     });
     a.detClass.forEach((c) => { if (c.covers >= 1) { agg.precise++; pagePrecise++; } else { agg.falsePos++; } if (c.covers >= 2) agg.overFuse++; });
 
-    // (b) AUTO-CORRECTIONS
-    // every ground-truth block -> a region positive (exact box, canonical name), hosted on any real band.
-    if (hostId && a.gt.length) {
-      const regions = a.gt.map((g) => ({
-        x: Math.max(0, Math.min(1, g.x / pageWcss)), y: Math.max(0, Math.min(1, g.y0 / pageHcss)),
-        w: Math.max(0, Math.min(1, g.w / pageWcss)), h: Math.max(0, Math.min(1, (g.y1 - g.y0) / pageHcss)),
+    // (b) AUTO-CORRECTIONS — the same corrections.json a human would export, keyed by band id.
+    const clamp = (v) => Math.max(0, Math.min(1, v));
+    const ensure = (id) => corrections[id] || (corrections[id] = { type: '', was: '', url: pg.url, _auto: true, _via: 'eds-oracle' });
+
+    // every ground-truth block -> a region positive (exact box, canonical name). Host it on the DETECTED
+    // band that best overlaps it, so it shows up in that instance's modal for review; a recall-missed
+    // block (no overlapping band) falls back to the page's first band.
+    a.gt.forEach((g, gi) => {
+      const m = a.gtMatch[gi];
+      const hid = m ? `${slug}_${Math.round(a.detected[m.di].y0)}` : hostId;
+      if (!hid) return;
+      const e = ensure(hid);
+      (e.regions = e.regions || []).push({
+        x: clamp(g.x / pageWcss), y: clamp(g.y0 / pageHcss), w: clamp(g.w / pageWcss), h: clamp((g.y1 - g.y0) / pageHcss),
         type: g.canon, reason: `EDS ground-truth block "${g.name}"`,
-      }));
-      corrections[hostId] = Object.assign(corrections[hostId] || {}, { url: pg.url, _auto: true, _via: 'eds-oracle', regions });
-      if (!('type' in corrections[hostId])) corrections[hostId].type = '';
-    }
-    // detected bands that are over-admissions / over-fusions -> negative structural verdicts.
+      });
+    });
+    // detected bands that are over-fusions / over-admissions -> negative structural verdicts.
     // covers===0 means the band matches NO ground-truth block: by the oracle's own definition it is not a
     // block (default content, chrome, or over-cut prose), so it is a not-a-block negative — the exact
     // signal tuneAdmit needs to tighten the learned-admission threshold (matching the scorecard precision).
     a.detected.forEach((d, di) => {
       const id = `${slug}_${Math.round(d.y0)}`;
       const c = a.detClass[di];
-      if (c.covers >= 2) { // spans multiple GT blocks -> over-fused
-        if (id === hostId) corrections[id].type = '__split__'; else corrections[id] = { type: '__split__', was: d.subtype, url: pg.url, _auto: true, _via: 'eds-oracle' };
-      } else if (c.covers === 0) { // matches no real block -> not a block
-        const via = c.onDefault ? 'eds-oracle:default' : 'eds-oracle:unmatched';
-        if (id === hostId) corrections[id].type = '__notblock__'; else corrections[id] = { type: '__notblock__', was: d.subtype, url: pg.url, _auto: true, _via: via };
-      }
+      const e = ensure(id); e.was = d.subtype;
+      if (c.covers >= 2) e.type = '__split__';                                    // spans multiple GT blocks
+      else if (c.covers === 0) { e.type = '__notblock__'; e._via = c.onDefault ? 'eds-oracle:default' : 'eds-oracle:unmatched'; }
     });
 
     perPage.push({ slug, url: pg.url, gt: a.gt.length, detected: a.detected.length, recalled: pageRecalled, precise: pagePrecise });

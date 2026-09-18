@@ -40,6 +40,8 @@
   .badge.done { background: #e3f6ec; color: #157a4e; }
   .badge.running, .badge.queued { background: #fff3d6; color: #8a6100; }
   .badge.error { background: #fbe3e0; color: #b0281a; }
+  .badge.learn { background: #dfeeff; color: #1c5fa8; }
+  .meta.sc { color: #0e7a4e; font-weight: 600; }
   .run .del { float: right; color: #b00; background: none; border: none; font-size: 14px; cursor: pointer; padding: 0 2px; }
   .run .rerender { float: right; color: var(--greenD); background: none; border: none; font-size: 15px; cursor: pointer; padding: 0 4px; line-height: 1; }
   .run .rerender:hover { color: var(--green); }
@@ -89,6 +91,12 @@
       <label class="field" style="max-width:130px">
         <span>Scan threads</span>
         <input id="conc" type="number" min="1" max="8" step="1" value="4">
+      </label>
+      <label class="field learn-field" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:#f2fbf6">
+        <input id="learn" type="checkbox" style="width:auto;margin:2px 0 0">
+        <span style="margin:0;font-weight:600">Learning mode <em>(EDS pages)</em><br>
+          <em style="font-weight:400">Feed already-migrated EDS URLs. The tool reads each page's DOM as
+          ground truth, scores its own detection, and pre-loads the corrections — hit Analyze to learn.</em></span>
       </label>
       <div>
         <button id="run" class="primary">Scan &amp; scope</button>
@@ -154,7 +162,7 @@
     runBtn.disabled = true; msgEl.className = 'msg'; msgEl.textContent = 'starting…';
     fetch('/api/scoper/runs', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ urls: urls, label: labelEl.value.trim(), concurrency: Number(concEl.value) || 4 })
+      body: JSON.stringify({ urls: urls, label: labelEl.value.trim(), concurrency: Number(concEl.value) || 4, learn: $('learn').checked })
     }).then(function (r) { return r.json(); }).then(function (j) {
       runBtn.disabled = false;
       if (!j.jobId) { fail(j.error || 'could not start'); return; }
@@ -190,10 +198,12 @@
         '<div class="site">' + esc(r.label || r.siteHost || r.id.slice(0, 8)) + '</div>' +
         '<div class="meta">' +
           '<span class="badge ' + st + '">' + st + (st !== 'done' && st !== 'error' && r.stage ? ' · ' + esc(r.stage) : '') + '</span>' +
+          (r.learn ? '<span class="badge learn" title="Learning mode — scored against the page DOM">EDS learn</span>' : '') +
           (r.siteHost ? '<span>' + esc(r.siteHost) + '</span>' : '') +
           (counts.length ? '<span>' + counts.join(' · ') + '</span>' : '') +
           '<span>' + when + '</span>' +
         '</div>' +
+        (r.scorecard ? '<div class="meta sc">📊 recall ' + pctv(r.scorecard.recall) + ' · precision ' + pctv(r.scorecard.precision) + ' · type ' + pctv(r.scorecard.typeConsistency) + (r.scorecard.gtBlocks != null ? ' · ' + r.scorecard.gtBlocks + ' GT blocks' : '') + '</div>' : '') +
         (r.error ? '<div class="meta" style="color:#b0281a">' + esc(String(r.error).slice(0, 160)) + '</div>' : '');
       el.onclick = function (ev) { if (ev.target.classList.contains('del') || ev.target.classList.contains('rerender')) return; open_(r.id); };
       el.querySelector('.del').onclick = function () { del(r.id); };
@@ -254,6 +264,10 @@
   }, 1200);
 
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function pctv(x) { return Math.round((x || 0) * 100) + '%'; }
+
+  // Reflect learning mode in the run button so it's clear what pressing it does.
+  $('learn').addEventListener('change', function () { runBtn.textContent = this.checked ? 'Scan & learn' : 'Scan & scope'; });
 
   $('refresh').onclick = refresh;
 

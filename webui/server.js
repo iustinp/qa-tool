@@ -676,7 +676,7 @@ let scoperRunning = 0;
 // Fields mirrored to <dir>/job.json so scoper history survives a restart (the live
 // child, the log tail, and the raw corrections are not persisted — recomputed/dropped).
 const SCOPER_PERSIST = [
-  'id', 'kind', 'label', 'urls', 'concurrency', 'corpus', 'runId',
+  'id', 'kind', 'label', 'urls', 'concurrency', 'corpus', 'runId', 'learn', 'scorecard',
   'status', 'stage', 'error', 'visualUrl', 'siteHost', 'urlCount', 'blockCount',
   'createdAt', 'updatedAt',
 ];
@@ -728,7 +728,7 @@ function newScoperJob(spec) {
   const urls = Array.isArray(spec.urls) ? spec.urls : [];
   const job = {
     id, kind: spec.kind, label: (spec.label || 'scoper').replace(/[^a-z0-9_-]+/gi, '-').slice(0, 40),
-    corpus: spec.corpus || null, corrections: spec.corrections || null,
+    corpus: spec.corpus || null, corrections: spec.corrections || null, learn: !!spec.learn,
     urls, urlCount: urls.length, concurrency: Math.min(8, Math.max(1, Number(spec.concurrency) || 4)),
     runId: spec.runId || null, siteHost: urls.length ? hostOfSafe(urls[0]) : (spec.siteHost || null),
     status: 'queued', stage: 'queued', error: null, log: '', visualUrl: null, blockCount: null,
@@ -745,7 +745,7 @@ function spawnScoper(job, args, cwd) {
   return new Promise((resolve) => {
     job.status = 'running'; job.updatedAt = Date.now(); scoperPersist(job);
     // SCOPER_WEB tells scope.js to render the visual in server mode (Analyze -> fetch, not CLI).
-    const child = spawn(process.execPath, args, { cwd, env: { ...process.env, SCOPER_WEB: job.corpus || '', SCOPER_CORRECTIONS: job.correctionsPath || '' } });
+    const child = spawn(process.execPath, args, { cwd, env: { ...process.env, SCOPER_WEB: job.corpus || '', SCOPER_CORRECTIONS: job.correctionsPath || '', SCOPER_SEED_CORRECTIONS: job.seedPath || '', SCOPER_SCORECARD: job.scorecardPath || '' } });
     job.child = child;
     const onc = (d) => {
       const text = d.toString();
@@ -772,6 +772,27 @@ async function runScoperJob(job) {
     job.stage = 'scan'; scoperPersist(job);
     const scanned = await spawnScoper(job, [path.join(SCOPER_ROOT, 'scan.js'), urlsCsv, corpusDir, String(job.concurrency)], PROJECT_ROOT);
     if (!scanned) { scoperPersist(job); return; }
+
+    // LEARNING MODE (EDS): capture the page DOM as ground truth, grade detection against it, and seed the
+    // resulting scorecard + auto-corrections into the visual (best-effort — a non-EDS/unreachable corpus
+    // just falls through to a normal scope). eds-oracle.js and align.js never touch detection.
+    if (job.learn) {
+      job.stage = 'oracle'; scoperPersist(job);
+      const oracled = await spawnScoper(job, [path.join(SCOPER_ROOT, 'eds-oracle.js'), corpusDir, String(job.concurrency)], PROJECT_ROOT);
+      if (oracled) {
+        job.stage = 'align'; scoperPersist(job);
+        await spawnScoper(job, [path.join(SCOPER_ROOT, 'align.js'), corpusDir, path.join(SCOPER_ROOT, 'store.json')], PROJECT_ROOT);
+        const scPath = path.join(corpusDir, 'scorecard.json');
+        const seedPath = path.join(corpusDir, 'eds-corrections.json');
+        try {
+          const sc = JSON.parse(fs.readFileSync(scPath, 'utf8'));
+          job.scorecard = { pages: sc.pages, gtBlocks: sc.gtBlocks, recall: sc.recall, precision: sc.precision, typeConsistency: sc.typeConsistency, meanIoU: sc.meanIoU, missedBlocks: sc.missedBlocks };
+        } catch { /* no scorecard */ }
+        if (fs.existsSync(scPath)) job.scorecardPath = scPath;
+        if (fs.existsSync(seedPath)) job.seedPath = seedPath;
+      }
+      job.error = null; // learning is best-effort; proceed to scope regardless of oracle/align outcome
+    }
   }
 
   if (job.kind === 'analyze') {
@@ -994,7 +1015,7 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const urls = parseUrlList(body.urls);
       if (!urls.length) return sendJson(res, 400, { error: 'Enter at least one URL (or upload a one-column CSV).' });
-      const job = newScoperJob({ kind: 'run', urls, label: body.label, concurrency: body.concurrency });
+      const job = newScoperJob({ kind: 'run', urls, label: body.label, concurrency: body.concurrency, learn: !!body.learn });
       return sendJson(res, 201, { jobId: job.id });
     }
     if (pathname === '/api/scoper/runs' && req.method === 'GET') {

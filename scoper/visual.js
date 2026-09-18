@@ -237,6 +237,8 @@ async function buildVisual(inv, opts = {}) {
 
   const serverMode = !!opts.serverMode;
   const corpus = opts.corpus || '';
+  const seedCorrections = opts.seedCorrections || null; // learning mode: DOM-ground-truth auto-corrections
+  const scorecard = opts.scorecard || null;             // learning mode: recall/precision/... scorecard
   // Server mode (served by the webui at /scoper): Analyze POSTs corrections to the server, which runs
   // analyze + re-scope as a job, then the page navigates to the regenerated inventory. Standalone
   // (file://) mode keeps the export + CLI-instructions fallback.
@@ -276,7 +278,11 @@ async function buildVisual(inv, opts = {}) {
     var CORPUS = ${JSON.stringify(corpus)};
     var PAGEBANDS = ${JSON.stringify(pageBands)};
     var PAGECUTS = ${JSON.stringify(pageCuts)};
-    var store = JSON.parse(localStorage.getItem(KEY) || '{}');
+    // Learning mode: DOM-ground-truth auto-corrections pre-loaded for review (only when localStorage is
+    // empty for this run, so a returning reviewer keeps their own edits and never gets re-seeded).
+    var SEED = ${JSON.stringify(seedCorrections)};
+    var store = JSON.parse(localStorage.getItem(KEY) || 'null');
+    if (!store) { store = SEED ? JSON.parse(JSON.stringify(SEED)) : {}; if (SEED) { try { localStorage.setItem(KEY, JSON.stringify(store)); } catch(e){} } }
     var save = function(){ localStorage.setItem(KEY, JSON.stringify(store)); setStatus(); };
     function setStatus(){ document.getElementById('status').textContent = Object.keys(store).length + ' corrections stored'; }
     function ent(id){ return store[id] || (store[id] = {}); }
@@ -522,7 +528,22 @@ async function buildVisual(inv, opts = {}) {
       renderRegions(); drawBoxes();
     });`;
 
-  const html = `<!doctype html><html><head><meta charset="utf8"><title>scoper visual inventory — ${esc(label)}</title><style>${css}</style></head><body>
+  const scPct = (x) => `${Math.round((x || 0) * 100)}%`;
+  const scHtml = scorecard ? `<div class="scorebar">
+      <b>📊 EDS scorecard</b>
+      <span>${scorecard.pages} pages · ${scorecard.gtBlocks} ground-truth blocks</span>
+      <span class="sc"><i>recall</i> ${scPct(scorecard.recall)}</span>
+      <span class="sc"><i>precision</i> ${scPct(scorecard.precision)}</span>
+      <span class="sc"><i>type consistency</i> ${scPct(scorecard.typeConsistency)}</span>
+      <span class="sc"><i>boundary IoU</i> ${(scorecard.meanIoU || 0).toFixed(2)}</span>
+      <span class="scnote">Auto-corrections from the page DOM are pre-loaded below — review/adjust, then <b>Analyze</b> to learn (or just Analyze to accept all).</span>
+    </div>` : '';
+
+  const html = `<!doctype html><html><head><meta charset="utf8"><title>scoper visual inventory — ${esc(label)}</title><style>${css}
+    .scorebar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:8px 14px;background:#0e3a2b;color:#eafff5;font-size:12px;border-bottom:1px solid #0a2b20}
+    .scorebar .sc{background:rgba(255,255,255,.12);border-radius:10px;padding:2px 9px}
+    .scorebar .sc i{font-style:normal;opacity:.7;margin-right:5px}
+    .scorebar .scnote{opacity:.75;font-size:11px;margin-left:auto}</style></head><body>
     <div class="topbar">
       <b>Scoper — visual block inventory</b>
       <span>${esc(label)} · ${pages} pages · ${cols.length} block types</span>
@@ -531,6 +552,7 @@ async function buildVisual(inv, opts = {}) {
       <button id="analyze" title="Export corrections and show the analyze command">▶ Analyze corrections</button>
       <span id="status"></span>
     </div>
+    ${scHtml}
     <div class="board">${colHtml}</div>
     <div class="modal" id="modal">
       <div class="mback"></div>
