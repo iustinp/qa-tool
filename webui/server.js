@@ -648,6 +648,72 @@ function serveStatic(res, baseDir, urlPath, fallback) {
   });
 }
 
+// ===== SCOPER (issue #65) — isolated source-scoping tool, reachable ONLY by hand-typing /scoper.
+// Deliberately kept separate from the main run machinery (its own job map/queue) so scoper jobs
+// never appear in the main runs list and nothing here touches the main UI. Spawns the scoper CLIs.
+const SCOPER_ROOT = path.join(PROJECT_ROOT, 'scoper');
+const SCOPER_RUNS = path.join(RUNS_DIR, 'scoper'); // webui/runs/scoper/<id>/ (gitignored)
+fs.mkdirSync(SCOPER_RUNS, { recursive: true });
+const scoperJobs = new Map();
+const scoperQueue = [];
+let scoperRunning = 0;
+
+function scoperPump() {
+  while (scoperRunning < MAX_CONCURRENT && scoperQueue.length) {
+    const id = scoperQueue.shift();
+    const job = scoperJobs.get(id);
+    if (!job) continue;
+    scoperRunning += 1;
+    runScoperJob(job)
+      .catch((e) => { job.status = 'error'; job.error = String(e); })
+      .finally(() => { scoperRunning -= 1; scoperPump(); });
+  }
+}
+
+function newScoperJob(spec) {
+  const id = randomUUID();
+  const job = {
+    id, kind: spec.kind, label: (spec.label || 'scoper').replace(/[^a-z0-9_-]+/gi, '-').slice(0, 40),
+    corpus: spec.corpus, corrections: spec.corrections || null,
+    status: 'queued', stage: 'queued', error: null, log: '', visualUrl: null,
+    dir: path.join(SCOPER_RUNS, id), createdAt: Date.now(), updatedAt: Date.now(),
+  };
+  scoperJobs.set(id, job);
+  scoperQueue.push(id);
+  scoperPump();
+  return job;
+}
+
+function spawnScoper(job, args, cwd) {
+  return new Promise((resolve) => {
+    job.status = 'running'; job.stage = path.basename(args[0]); job.updatedAt = Date.now();
+    // SCOPER_WEB tells scope.js to render the visual in server mode (Analyze -> fetch, not CLI).
+    const child = spawn(process.execPath, args, { cwd, env: { ...process.env, SCOPER_WEB: job.corpus } });
+    job.child = child;
+    const onc = (d) => { job.log = tail(job.log + d.toString(), 8000); job.updatedAt = Date.now(); };
+    child.stdout.on('data', onc); child.stderr.on('data', onc);
+    child.on('error', (e) => { job.status = 'error'; job.error = `spawn failed: ${e.message}`; resolve(false); });
+    child.on('close', (code) => { job.child = null; if (code !== 0) { job.status = 'error'; job.error = `exit ${code}\n${tail(job.log, 800)}`; } resolve(code === 0); });
+  });
+}
+
+async function runScoperJob(job) {
+  fs.mkdirSync(job.dir, { recursive: true });
+  const pearsDir = fs.existsSync(path.join(job.corpus, 'pairs')) ? path.join(job.corpus, 'pairs') : job.corpus;
+  if (job.kind === 'analyze') {
+    const corrPath = path.join(job.dir, 'corrections.json');
+    fs.writeFileSync(corrPath, JSON.stringify(job.corrections || {}));
+    const ok = await spawnScoper(job, [path.join(SCOPER_ROOT, 'analyze.js'), corrPath, pearsDir, path.join(SCOPER_ROOT, 'store.json')], PROJECT_ROOT);
+    if (!ok) return; // analyze failed -> leave job in error, don't re-scope
+  }
+  // (re-)scope with the current store; cwd = job dir so scoper-run_visual-* lands isolated here.
+  const ok = await spawnScoper(job, [path.join(SCOPER_ROOT, 'scope.js'), job.corpus, job.label], job.dir);
+  if (!ok) return;
+  const vis = fs.readdirSync(job.dir).find((d) => d.startsWith('scoper-run_visual-'));
+  job.visualUrl = vis ? `/api/scoper/runs/${job.id}/files/${vis}/index.html` : null;
+  job.status = 'done'; job.stage = 'done'; job.updatedAt = Date.now();
+}
+
 // ---- Router -------------------------------------------------------------------
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
@@ -768,6 +834,35 @@ const server = http.createServer(async (req, res) => {
     // Stub artifact fallback.
     if (/^\/api\/runs\/[^/]+\/artifacts\//.test(pathname) && req.method === 'GET') {
       return serveStatic(res, SAMPLE_RESULTS, 'placeholder.svg', null);
+    }
+
+    // --- Scoper (isolated; reachable only by hand-typing /scoper — no links from the main UI) ---
+    if (pathname === '/scoper' && req.method === 'GET') {
+      return serveStatic(res, PUBLIC_DIR, '/scoper.html', null); // null fallback => real 404, not the main page
+    }
+    if (pathname === '/api/scoper/scope' && req.method === 'POST') {
+      const body = await readBody(req);
+      if (!body.corpus) return sendJson(res, 400, { error: 'corpus path required' });
+      const job = newScoperJob({ kind: 'scope', corpus: path.resolve(PROJECT_ROOT, body.corpus), label: body.label });
+      return sendJson(res, 201, { jobId: job.id });
+    }
+    if (pathname === '/api/scoper/analyze' && req.method === 'POST') {
+      const body = await readBody(req);
+      if (!body.corpus) return sendJson(res, 400, { error: 'corpus path required' });
+      const job = newScoperJob({ kind: 'analyze', corpus: path.resolve(PROJECT_ROOT, body.corpus), corrections: body.corrections || {}, label: body.label });
+      return sendJson(res, 201, { jobId: job.id });
+    }
+    const scoperRun = pathname.match(/^\/api\/scoper\/runs\/([^/]+)$/);
+    if (scoperRun && req.method === 'GET') {
+      const job = scoperJobs.get(scoperRun[1]);
+      if (!job) return sendJson(res, 404, { error: 'not found' });
+      return sendJson(res, 200, { id: job.id, kind: job.kind, status: job.status, stage: job.stage, error: job.error, visualUrl: job.visualUrl });
+    }
+    const scoperFiles = pathname.match(/^\/api\/scoper\/runs\/([^/]+)\/files\/(.*)$/);
+    if (scoperFiles && req.method === 'GET') {
+      const job = scoperJobs.get(scoperFiles[1]);
+      if (!job) return void (res.writeHead(404), res.end('Not found'));
+      return serveStatic(res, job.dir, scoperFiles[2], null);
     }
 
     if (req.method === 'GET') {

@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf8">
+<title>Scoper — source-site block inventory</title>
+<style>
+  html, body { margin: 0; height: 100%; font: 13px system-ui, -apple-system, sans-serif; color: #1c1c1c; }
+  body { display: flex; flex-direction: column; }
+  #bar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #fff; border-bottom: 1px solid #d8d8d8; flex-wrap: wrap; }
+  #bar b { font-size: 14px; }
+  #corpus { flex: 1; min-width: 320px; padding: 6px 9px; border: 1px solid #bbb; border-radius: 6px; font: 12px ui-monospace, monospace; }
+  button { font: 13px system-ui; padding: 6px 12px; border: 1px solid #bbb; border-radius: 6px; background: #1a9e6a; color: #fff; border-color: #158a5c; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  #status { color: #555; font-size: 12px; }
+  #frame { flex: 1; width: 100%; border: 0; background: #eef0f3; }
+  .hint { color: #888; font-size: 11px; }
+</style>
+</head>
+<body>
+  <div id="bar">
+    <b>Scoper</b>
+    <input id="corpus" placeholder="corpus path — e.g. scoper_usta  (or an absolute pears dir)" spellcheck="false">
+    <button id="run">Run scope</button>
+    <span id="status"></span>
+    <span class="hint">isolated tool · not linked from the main UI</span>
+  </div>
+  <iframe id="frame" title="scoper inventory"></iframe>
+<script>
+  var statusEl = document.getElementById('status');
+  var frame = document.getElementById('frame');
+  var runBtn = document.getElementById('run');
+  var corpusEl = document.getElementById('corpus');
+
+  runBtn.onclick = function () {
+    var corpus = corpusEl.value.trim();
+    if (!corpus) { statusEl.textContent = 'enter a corpus path first'; return; }
+    runBtn.disabled = true;
+    statusEl.textContent = 'scoping…';
+    fetch('/api/scoper/scope', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ corpus: corpus }) })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { if (j.jobId) poll(j.jobId); else fail(j.error || 'no jobId'); })
+      .catch(function (e) { fail(String(e)); });
+  };
+  corpusEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') runBtn.click(); });
+
+  function poll(id) {
+    fetch('/api/scoper/runs/' + id).then(function (r) { return r.json(); }).then(function (j) {
+      if (j.status === 'done') { statusEl.textContent = 'done'; runBtn.disabled = false; if (j.visualUrl) frame.src = j.visualUrl; }
+      else if (j.status === 'error') { fail((j.error || '').slice(0, 300)); }
+      else { statusEl.textContent = (j.status || '') + (j.stage ? ' · ' + j.stage : ''); setTimeout(function () { poll(id); }, 700); }
+    }).catch(function (e) { fail(String(e)); });
+  }
+  function fail(msg) { statusEl.textContent = 'error: ' + msg; runBtn.disabled = false; }
+</script>
+</body>
+</html>

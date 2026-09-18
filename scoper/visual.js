@@ -169,11 +169,35 @@ async function buildVisual(inv, opts = {}) {
     .rgn .rh .rsp{flex:1}
     .rgn .del{color:#c00;cursor:pointer;border:none;background:none;font-size:16px;padding:0}`;
 
-  // Client JS — string concatenation only (no template literals / no "${" other than the two below,
-  // which ARE interpolated at generation time: the localStorage key and the VOCAB list).
+  const serverMode = !!opts.serverMode;
+  const corpus = opts.corpus || '';
+  // Server mode (served by the webui at /scoper): Analyze POSTs corrections to the server, which runs
+  // analyze + re-scope as a job, then the page navigates to the regenerated inventory. Standalone
+  // (file://) mode keeps the export + CLI-instructions fallback.
+  const analyzeJs = serverMode
+    ? `document.getElementById('analyze').onclick = function(){
+        if (!Object.keys(store).length){ alert('No corrections yet — set a type or draw a region first.'); return; }
+        var b=this; b.disabled=true; b.textContent='Analyzing…';
+        fetch('/api/scoper/analyze',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({corpus:CORPUS,corrections:store})})
+          .then(function(r){return r.json();}).then(function(j){ if(j.jobId){ pollAnalyze(j.jobId,b); } else { b.disabled=false; b.textContent='▶ Analyze corrections'; alert('analyze error: '+(j.error||'')); } })
+          .catch(function(e){ b.disabled=false; b.textContent='▶ Analyze corrections'; alert(String(e)); });
+      };
+      function pollAnalyze(id,b){ fetch('/api/scoper/runs/'+id).then(function(r){return r.json();}).then(function(j){
+        if(j.status==='done'){ b.textContent='Reloading…'; window.location = j.visualUrl; }
+        else if(j.status==='error'){ b.disabled=false; b.textContent='▶ Analyze corrections'; alert('Analyze failed: '+(j.error||'')); }
+        else { b.textContent='Analyzing… '+(j.stage||''); setTimeout(function(){ pollAnalyze(id,b); },800); } }); }`
+    : `document.getElementById('analyze').onclick = function(){
+        if (!Object.keys(store).length){ alert('No corrections yet — set a type or draw a region first.'); return; }
+        document.getElementById('export').click();
+        alert('Corrections exported.\\n\\nTo learn from them (deterministic, no AI):\\n  node scoper/analyze.js <downloaded .json> <corpus>/pairs\\n\\nThen re-run:  node scoper/scope.js <corpus>\\nto re-type with the updated store.');
+      };`;
+
+  // Client JS — string concatenation only (no template literals) except the interpolated spots below:
+  // the localStorage KEY, VOCAB, CORPUS, and the analyzeJs block chosen above.
   const js = `
     var KEY = 'ppd-scoper-corrections-${label}';
     var VOCAB = ${JSON.stringify(VOCAB)};
+    var CORPUS = ${JSON.stringify(corpus)};
     var store = JSON.parse(localStorage.getItem(KEY) || '{}');
     var save = function(){ localStorage.setItem(KEY, JSON.stringify(store)); setStatus(); };
     function setStatus(){ document.getElementById('status').textContent = Object.keys(store).length + ' corrections stored'; }
@@ -221,11 +245,7 @@ async function buildVisual(inv, opts = {}) {
       var blob = new Blob([JSON.stringify(store, null, 2)], { type: 'application/json' });
       var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'scoper-corrections-${label}.json'; a.click();
     };
-    document.getElementById('analyze').onclick = function(){
-      if (!Object.keys(store).length){ alert('No corrections yet — set a type or draw a region first.'); return; }
-      document.getElementById('export').click();
-      alert('Corrections exported.\\n\\nTo learn from them (deterministic, no AI):\\n  node scoper/analyze.js <downloaded .json> <corpus>/pairs\\n\\nThen re-run:  node scoper/scope.js <corpus>\\nto re-type with the updated store.');
-    };
+    ${analyzeJs}
 
     // ---- modal: full page + draw true-block regions ----
     var M = { inst:null, id:null, sel:-1 };

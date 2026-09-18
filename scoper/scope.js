@@ -68,7 +68,10 @@ function resolvePairs(dir) {
     JSON.stringify({ pages: pears.length, blocks: inv.map(({ occurrences, ...b }) => b) }, null, 2));
 
   console.log(`\n[3/3] visual inventory + correction UI`);
-  const { outDir, cols, cropOk } = await buildVisual(inv, { label, perCol: 16, pages: pears.length });
+  // When launched by the webui (/scoper), SCOPER_WEB carries the corpus path -> render the page in
+  // server mode so its Analyze button POSTs to /api/scoper/analyze instead of exporting a file.
+  const web = process.env.SCOPER_WEB;
+  const { outDir, cols, cropOk } = await buildVisual(inv, { label, perCol: 16, pages: pears.length, serverMode: !!web, corpus: web || '' });
 
   const secs = Math.round((Date.now() - t0) / 1000);
   console.log(`\n✓ scope done in ${secs}s`);
