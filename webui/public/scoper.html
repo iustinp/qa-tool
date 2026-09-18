@@ -1,56 +1,226 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Scoper — source-site block inventory</title>
 <style>
-  html, body { margin: 0; height: 100%; font: 13px system-ui, -apple-system, sans-serif; color: #1c1c1c; }
+  :root { --bg:#eef0f3; --panel:#fff; --line:#d8d8d8; --ink:#1c1c1c; --muted:#666; --green:#1a9e6a; --greenD:#158a5c; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; } /* a class's display: must not defeat the hidden attribute */
+  html, body { margin: 0; height: 100%; font: 13px system-ui, -apple-system, sans-serif; color: var(--ink); background: var(--bg); }
   body { display: flex; flex-direction: column; }
-  #bar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #fff; border-bottom: 1px solid #d8d8d8; flex-wrap: wrap; }
-  #bar b { font-size: 14px; }
-  #corpus { flex: 1; min-width: 320px; padding: 6px 9px; border: 1px solid #bbb; border-radius: 6px; font: 12px ui-monospace, monospace; }
-  button { font: 13px system-ui; padding: 6px 12px; border: 1px solid #bbb; border-radius: 6px; background: #1a9e6a; color: #fff; border-color: #158a5c; cursor: pointer; }
+  header.top { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header.top b { font-size: 15px; }
+  header.top .hint { color: #999; font-size: 11px; margin-left: auto; }
+  .layout { flex: 1; display: grid; grid-template-columns: 340px 300px 1fr; min-height: 0; }
+  .panel { border-right: 1px solid var(--line); background: var(--panel); overflow: auto; padding: 14px; }
+  .panel.results { padding: 0; background: var(--bg); display: flex; flex-direction: column; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 10px; }
+  .field { display: block; margin-bottom: 12px; }
+  .field > span { display: block; font-weight: 600; margin-bottom: 4px; }
+  .field em { color: var(--muted); font-weight: 400; font-style: normal; }
+  input[type=text], input[type=number], textarea { width: 100%; padding: 6px 9px; border: 1px solid #bbb; border-radius: 6px; font: 12px ui-monospace, SFMono-Regular, monospace; }
+  textarea { resize: vertical; }
+  .row { display: flex; gap: 10px; }
+  .row .field { flex: 1; }
+  button { font: 13px system-ui; padding: 6px 12px; border: 1px solid #bbb; border-radius: 6px; background: #f3f3f3; cursor: pointer; }
+  button.primary { background: var(--green); color: #fff; border-color: var(--greenD); }
   button:disabled { opacity: .5; cursor: default; }
-  #status { color: #555; font-size: 12px; }
-  #frame { flex: 1; width: 100%; border: 0; background: #eef0f3; }
-  .hint { color: #888; font-size: 11px; }
+  .link { background: none; border: none; color: var(--greenD); padding: 0; font-size: 12px; cursor: pointer; text-decoration: underline; }
+  .msg { color: var(--muted); font-size: 12px; margin-left: 8px; }
+  .msg.err { color: #c0392b; }
+  .runs { display: flex; flex-direction: column; gap: 8px; }
+  .run { border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; cursor: pointer; background: #fff; }
+  .run:hover { border-color: #9fb; }
+  .run.active { border-color: var(--green); box-shadow: 0 0 0 2px rgba(26,158,106,.18); }
+  .run .site { font-weight: 600; word-break: break-all; }
+  .run .meta { color: var(--muted); font-size: 11px; margin-top: 3px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .badge { font-size: 10px; padding: 1px 6px; border-radius: 10px; text-transform: uppercase; letter-spacing: .03em; }
+  .badge.done { background: #e3f6ec; color: #157a4e; }
+  .badge.running, .badge.queued { background: #fff3d6; color: #8a6100; }
+  .badge.error { background: #fbe3e0; color: #b0281a; }
+  .run .del { float: right; color: #b00; background: none; border: none; font-size: 14px; cursor: pointer; padding: 0 2px; }
+  .empty { color: #999; font-style: italic; padding: 6px 2px; }
+  .panel-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  .panel-head h2 { margin: 0; }
+  .panel-head .sp { flex: 1; }
+  iframe { flex: 1; width: 100%; border: 0; background: var(--bg); }
+  .placeholder { flex: 1; display: flex; align-items: center; justify-content: center; color: #aaa; font-size: 13px; }
 </style>
 </head>
 <body>
-  <div id="bar">
+  <header class="top">
     <b>Scoper</b>
-    <input id="corpus" placeholder="corpus path — e.g. scoper_usta  (or an absolute pears dir)" spellcheck="false">
-    <button id="run">Run scope</button>
-    <span id="status"></span>
-    <span class="hint">isolated tool · not linked from the main UI</span>
+    <span>source-site block inventory</span>
+    <span class="hint">isolated tool · reachable only at /scoper · not linked from the main UI</span>
+  </header>
+
+  <div class="layout">
+    <!-- New run -->
+    <section class="panel">
+      <h2>New scope run</h2>
+      <label class="field">
+        <span>Label <em>(optional)</em></span>
+        <input id="label" type="text" placeholder="e.g. usta-foundation" spellcheck="false">
+      </label>
+      <label class="field">
+        <span>
+          Source URLs — one per line
+          <button type="button" id="browse" class="link">Upload CSV…</button>
+          <input id="csv" type="file" accept=".csv,text/csv" hidden>
+        </span>
+        <textarea id="urls" rows="10" wrap="off" spellcheck="false"
+          placeholder="https://www.example.com/&#10;https://www.example.com/about&#10;https://www.example.com/news/article"></textarea>
+      </label>
+      <label class="field" style="max-width:130px">
+        <span>Scan threads</span>
+        <input id="conc" type="number" min="1" max="8" step="1" value="4">
+      </label>
+      <div>
+        <button id="run" class="primary">Scan &amp; scope</button>
+        <span id="msg" class="msg"></span>
+      </div>
+      <p class="msg" style="margin:14px 0 0">A run captures each URL (pears + screenshot), then builds the
+        cross-page block inventory. One-column CSVs are read in your browser and appended above.</p>
+    </section>
+
+    <!-- Runs history -->
+    <section class="panel">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <h2 style="margin:0;flex:1">Runs</h2>
+        <button id="refresh" class="link">Refresh</button>
+      </div>
+      <div id="runs" class="runs"></div>
+    </section>
+
+    <!-- Results -->
+    <section class="panel results">
+      <div class="panel-head">
+        <h2 id="resTitle">Inventory</h2>
+        <span class="sp"></span>
+        <button id="closeRes" class="link" hidden>Close</button>
+      </div>
+      <div id="resPlaceholder" class="placeholder">Select or start a run to see its block inventory.</div>
+      <iframe id="frame" title="scoper inventory" hidden></iframe>
+    </section>
   </div>
-  <iframe id="frame" title="scoper inventory"></iframe>
+
 <script>
-  var statusEl = document.getElementById('status');
-  var frame = document.getElementById('frame');
-  var runBtn = document.getElementById('run');
-  var corpusEl = document.getElementById('corpus');
+  var $ = function (id) { return document.getElementById(id); };
+  var urlsEl = $('urls'), labelEl = $('label'), concEl = $('conc');
+  var runBtn = $('run'), msgEl = $('msg'), runsEl = $('runs');
+  var frame = $('frame'), resTitle = $('resTitle'), resPh = $('resPlaceholder'), closeRes = $('closeRes');
+  var activeId = null;
+  var lastRuns = [];
 
-  runBtn.onclick = function () {
-    var corpus = corpusEl.value.trim();
-    if (!corpus) { statusEl.textContent = 'enter a corpus path first'; return; }
-    runBtn.disabled = true;
-    statusEl.textContent = 'scoping…';
-    fetch('/api/scoper/scope', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ corpus: corpus }) })
-      .then(function (r) { return r.json(); })
-      .then(function (j) { if (j.jobId) poll(j.jobId); else fail(j.error || 'no jobId'); })
-      .catch(function (e) { fail(String(e)); });
+  // --- CSV upload: read client-side, append http(s) URLs to the textarea (no server multipart). ---
+  $('browse').onclick = function () { $('csv').click(); };
+  $('csv').onchange = function (e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      var rows = String(reader.result).split(/[\r\n]+/)
+        .map(function (l) { return l.split(/[;,]/)[0].trim(); })
+        .filter(function (u) { return /^https?:\/\//i.test(u); });
+      var existing = urlsEl.value.trim();
+      urlsEl.value = (existing ? existing + '\n' : '') + rows.join('\n');
+      msgEl.className = 'msg'; msgEl.textContent = '+' + rows.length + ' URLs from ' + file.name;
+    };
+    reader.readAsText(file);
+    e.target.value = '';
   };
-  corpusEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') runBtn.click(); });
 
-  function poll(id) {
-    fetch('/api/scoper/runs/' + id).then(function (r) { return r.json(); }).then(function (j) {
-      if (j.status === 'done') { statusEl.textContent = 'done'; runBtn.disabled = false; if (j.visualUrl) frame.src = j.visualUrl; }
-      else if (j.status === 'error') { fail((j.error || '').slice(0, 300)); }
-      else { statusEl.textContent = (j.status || '') + (j.stage ? ' · ' + j.stage : ''); setTimeout(function () { poll(id); }, 700); }
-    }).catch(function (e) { fail(String(e)); });
+  // --- Start a run ---
+  runBtn.onclick = function () {
+    var urls = urlsEl.value.trim();
+    if (!urls) { fail('Enter at least one URL, or upload a CSV.'); return; }
+    runBtn.disabled = true; msgEl.className = 'msg'; msgEl.textContent = 'starting…';
+    fetch('/api/scoper/runs', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ urls: urls, label: labelEl.value.trim(), concurrency: Number(concEl.value) || 4 })
+    }).then(function (r) { return r.json(); }).then(function (j) {
+      runBtn.disabled = false;
+      if (!j.jobId) { fail(j.error || 'could not start'); return; }
+      msgEl.textContent = ''; open_(j.jobId); refresh();
+    }).catch(function (e) { runBtn.disabled = false; fail(String(e)); });
+  };
+  function fail(m) { msgEl.className = 'msg err'; msgEl.textContent = m; }
+
+  // --- Runs list (single 1.2s poller drives live updates) ---
+  function refresh() {
+    return fetch('/api/scoper/runs').then(function (r) { return r.json(); }).then(function (j) {
+      lastRuns = j.runs || []; render(lastRuns);
+      // Keep the open run's inventory in sync as it progresses/finishes.
+      var act = lastRuns.filter(function (r) { return r.id === activeId; })[0];
+      if (act && !(act.status === 'done' && frame.getAttribute('src') === act.visualUrl)) syncActive(act);
+      return lastRuns;
+    });
   }
-  function fail(msg) { statusEl.textContent = 'error: ' + msg; runBtn.disabled = false; }
+  function render(runs) {
+    if (!runs.length) { runsEl.innerHTML = '<div class="empty">No runs yet.</div>'; return; }
+    runsEl.innerHTML = '';
+    runs.forEach(function (r) {
+      var el = document.createElement('div');
+      el.className = 'run' + (r.id === activeId ? ' active' : '');
+      var when = new Date(r.createdAt).toLocaleString();
+      var st = r.status || 'queued';
+      var counts = [];
+      if (r.urlCount != null) counts.push(r.urlCount + ' URLs');
+      if (r.blockCount != null) counts.push(r.blockCount + ' block types');
+      el.innerHTML =
+        '<button class="del" title="Delete run">✕</button>' +
+        '<div class="site">' + esc(r.label || r.siteHost || r.id.slice(0, 8)) + '</div>' +
+        '<div class="meta">' +
+          '<span class="badge ' + st + '">' + st + (st !== 'done' && st !== 'error' && r.stage ? ' · ' + esc(r.stage) : '') + '</span>' +
+          (r.siteHost ? '<span>' + esc(r.siteHost) + '</span>' : '') +
+          (counts.length ? '<span>' + counts.join(' · ') + '</span>' : '') +
+          '<span>' + when + '</span>' +
+        '</div>' +
+        (r.error ? '<div class="meta" style="color:#b0281a">' + esc(String(r.error).slice(0, 160)) + '</div>' : '');
+      el.onclick = function (ev) { if (ev.target.classList.contains('del')) return; open_(r.id); };
+      el.querySelector('.del').onclick = function () { del(r.id); };
+      runsEl.appendChild(el);
+    });
+  }
+  function del(id) {
+    if (!confirm('Delete this run and its captured corpus?')) return;
+    fetch('/api/scoper/runs/' + id, { method: 'DELETE' }).then(function () {
+      if (activeId === id) { activeId = null; showFrame(null); }
+      refresh();
+    });
+  }
+
+  // --- Open a run's inventory ---
+  function open_(id) {
+    activeId = id;
+    fetch('/api/scoper/runs/' + id).then(function (r) { return r.json(); }).then(function (j) {
+      syncActive(j); render(lastRuns);
+    });
+  }
+  function syncActive(j) {
+    resTitle.textContent = 'Inventory — ' + esc(j.label || j.siteHost || j.id.slice(0, 8));
+    if (j.status === 'done' && j.visualUrl) showFrame(j.visualUrl);
+    else if (j.status === 'error') { showFrame(null); resPh.textContent = 'Run failed: ' + (j.error || ''); }
+    else { showFrame(null); resPh.textContent = 'Run in progress (' + (j.stage || j.status) + ')…'; }
+  }
+  function showFrame(url) {
+    if (url) { if (frame.getAttribute('src') !== url) frame.src = url; frame.hidden = false; resPh.hidden = true; closeRes.hidden = false; }
+    else { frame.hidden = true; frame.removeAttribute('src'); resPh.hidden = false; closeRes.hidden = true; }
+  }
+  closeRes.onclick = function () { activeId = null; showFrame(null); render(lastRuns); };
+
+  // Single background poller: refresh whenever any run is still live.
+  setInterval(function () {
+    var live = lastRuns.some(function (r) { return r.status === 'running' || r.status === 'queued'; });
+    if (live) refresh();
+  }, 1200);
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+  $('refresh').onclick = refresh;
+  refresh();
 </script>
 </body>
 </html>
