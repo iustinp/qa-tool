@@ -784,8 +784,28 @@ async function runScoperJob(job) {
     if (!ok) { scoperPersist(job); return; } // analyze failed -> leave job in error, don't re-scope
     job.summary = summarizeAnalyze(job.log); // one-line "what the store learned", surfaced in the UI
     scoperPersist(job);
+    // Persist the run's CUMULATIVE corrections server-side (the durable override source): analyze.js
+    // learned from THIS batch; the re-scope + every later re-render apply the merged set. This lets the
+    // UI clear its correction flags after Analyze without the overrides reverting ("clear once absorbed").
+    if (job.runId) {
+      const runCorr = path.join(SCOPER_RUNS, job.runId, 'corrections.json');
+      let cum = {};
+      try { if (fs.existsSync(runCorr)) cum = JSON.parse(fs.readFileSync(runCorr, 'utf8')); } catch { /* start fresh */ }
+      Object.assign(cum, job.corrections || {}); // newest correction wins per band id
+      try { fs.mkdirSync(path.dirname(runCorr), { recursive: true }); fs.writeFileSync(runCorr, JSON.stringify(cum)); } catch { /* best effort */ }
+      job.correctionsPath = runCorr; // re-scope with the cumulative set, not just this batch
+    }
   }
 
+  // A re-render (kind 'scope'): apply overrides from any corrections sent, else the run's persisted set.
+  if (job.corrections && Object.keys(job.corrections).length && !job.correctionsPath) {
+    const corrPath = path.join(job.dir, 'corrections.json');
+    fs.writeFileSync(corrPath, JSON.stringify(job.corrections));
+    job.correctionsPath = corrPath;
+  } else if (!job.correctionsPath && job.runId) {
+    const runCorr = path.join(SCOPER_RUNS, job.runId, 'corrections.json');
+    if (fs.existsSync(runCorr)) job.correctionsPath = runCorr; // durable overrides survive re-render
+  }
   // (re-)scope with the current store; cwd = job dir so scoper-run_visual-* lands isolated here.
   job.stage = 'scope'; scoperPersist(job);
   const ok = await spawnScoper(job, [path.join(SCOPER_ROOT, 'scope.js'), job.corpus, job.label], job.dir);
@@ -796,9 +816,9 @@ async function runScoperJob(job) {
   if (job.kind === 'analyze' && job.summary != null) job.summary += ` · re-scope → ${job.blockCount != null ? job.blockCount : '?'} block types`;
   job.status = 'done'; job.stage = 'done'; job.updatedAt = Date.now();
 
-  // An analyze re-scope belongs to an existing run — point that run at the fresh
-  // inventory so re-analysis sticks in the history (corpus = <runDir>/corpus).
-  if (job.kind === 'analyze' && job.runId) {
+  // An analyze/re-render job belongs to an existing run — point that run at the fresh inventory so
+  // re-analysis (and a plain re-render) stick in the history (corpus = <runDir>/corpus).
+  if (job.runId) {
     const parent = scoperJobs.get(job.runId);
     if (parent) { parent.visualUrl = job.visualUrl; parent.blockCount = job.blockCount; parent.updatedAt = Date.now(); scoperPersist(parent); }
   }
@@ -816,7 +836,7 @@ function readBlockCount(corpus) {
 // Distil analyze.js stdout into a one-line "what the store learned" for the UI (silent-reload fix).
 function summarizeAnalyze(log) {
   const applied = (log.match(/applied (\d+) corrections/) || [])[1];
-  const tally = (log.match(/(\d+) confirmed · (\d+) reassign · (\d+) new-type · (\d+) fragment · (\d+) split · (\d+) region/) || []);
+  const tally = (log.match(/(\d+) confirmed · (\d+) reassign · (\d+) new-type · (\d+) fragment · (\d+) split · (\d+) not-block · (\d+) region/) || []);
   const acc = (log.match(/accuracy over \d+ accumulated corrections: (\d+)%/) || [])[1];
   const tuned = (log.match(/\(tuned\)/g) || []).length;
   const bits = [];
@@ -828,7 +848,8 @@ function summarizeAnalyze(log) {
     if (+tally[3]) parts.push(`${tally[3]} new-type`);
     if (+tally[4]) parts.push(`${tally[4]} fragment`);
     if (+tally[5]) parts.push(`${tally[5]} split`);
-    if (+tally[6]) parts.push(`${tally[6]} region`);
+    if (+tally[6]) parts.push(`${tally[6]} not-block`);
+    if (+tally[7]) parts.push(`${tally[7]} region`);
     if (parts.length) bits.push(parts.join(' + '));
   }
   bits.push(tuned ? `${tuned} type${tuned === 1 ? '' : 's'} self-tuned` : 'no radius widened yet (need ≥2 of a type)');
@@ -983,11 +1004,14 @@ const server = http.createServer(async (req, res) => {
         .map(scoperView);
       return sendJson(res, 200, { runs: list });
     }
-    // Scope an already-scanned corpus path (CLI parity; not used by the main UI form).
+    // Scope an already-scanned corpus — CLI parity, and the main UI's "Re-render" (regenerate the
+    // inventory with the current code, applying stored corrections as overrides, WITHOUT re-learning).
     if (pathname === '/api/scoper/scope' && req.method === 'POST') {
       const body = await readBody(req);
       if (!body.corpus) return sendJson(res, 400, { error: 'corpus path required' });
-      const job = newScoperJob({ kind: 'scope', corpus: path.resolve(PROJECT_ROOT, body.corpus), label: body.label });
+      const corpus = path.resolve(PROJECT_ROOT, body.corpus);
+      const runId = path.dirname(corpus).startsWith(SCOPER_RUNS) ? path.basename(path.dirname(corpus)) : null;
+      const job = newScoperJob({ kind: 'scope', corpus, label: body.label, runId, corrections: body.corrections || null });
       return sendJson(res, 201, { jobId: job.id });
     }
     if (pathname === '/api/scoper/analyze' && req.method === 'POST') {

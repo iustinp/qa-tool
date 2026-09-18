@@ -22,6 +22,7 @@ const { scan, readUrls } = require('./scan');
 const { loadPears } = require('./signature');
 const { classifyDescriptors } = require('./chrome');
 const { buildInventory } = require('./inventory');
+const { classifyPage } = require('./band-class');
 const { buildVisual } = require('./visual');
 
 function resolvePairs(dir) {
@@ -77,7 +78,10 @@ function resolvePairs(dir) {
   // When launched by the webui (/scoper), SCOPER_WEB carries the corpus path -> render the page in
   // server mode so its Analyze button POSTs to /api/scoper/analyze instead of exporting a file.
   const web = process.env.SCOPER_WEB;
-  const { outDir, cols, cropOk } = await buildVisual(inv, { label, perCol: 16, pages: pears.length, serverMode: !!web, corpus: web || '' });
+  // Full per-page band list (block + default + chrome) so the visual can SHOW what the tool ignored.
+  const allBands = {};
+  for (const pg of pears) allBands[path.basename(pg.dir)] = classifyPage(pg, keyBucket, { store }).map((b) => ({ y0: b.y0, y1: b.y1, cls: b.cls, subtype: b.subtype }));
+  const { outDir, cols, cropOk } = await buildVisual(inv, { label, perCol: 16, pages: pears.length, serverMode: !!web, corpus: web || '', allBands });
 
   const secs = Math.round((Date.now() - t0) / 1000);
   console.log(`\n✓ scope done in ${secs}s`);

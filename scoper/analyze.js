@@ -50,7 +50,7 @@ for (const pg of pears) {
 const store = loadStore(storePath);
 const before = scoreStore(store);
 let applied = 0, skipped = 0;
-const tally = { correct: 0, reassign: 0, new: 0, fragment: 0, split: 0, region: 0 };
+const tally = { correct: 0, reassign: 0, new: 0, fragment: 0, split: 0, notblock: 0, region: 0 };
 
 for (const [id, e] of Object.entries(corrections)) {
   const m = map[id];
@@ -67,6 +67,9 @@ for (const [id, e] of Object.entries(corrections)) {
   // inertly (kind 'split', ignored by scoring/merge) since we can't learn WHERE to cut without DOM
   // structure (Phase 2); the run is already corrected by the override dropping the band + adding regions.
   else if (verdict === '__split__') { store.corrections.push({ vec: bandVec, srcType: e.was, kind: 'split', src: id }); tally.split++; }
+  // Not a block: the tool wrongly admitted default content — add a 'default'-kind guard so this shape
+  // isn't admitted again (suppresses typing, does NOT trigger a merge), and count it as a negative.
+  else if (verdict === '__notblock__') { addNegative(store, e.was, bandVec, { url: e.url, reason: e.reason, kind: 'default' }); store.corrections.push({ vec: bandVec, srcType: e.was, kind: 'neg', src: id }); tally.notblock++; }
   else if (verdict === '__new__') { const n = e.newName || '(unnamed)'; addExemplar(store, n, bandVec, { url: e.url, reason: e.reason, characteristics: e.characteristics, verdict: 'new' }); store.corrections.push({ vec: bandVec, type: n, kind: 'pos', src: id }); tally.new++; }
   else if (verdict) { addExemplar(store, verdict, bandVec, { url: e.url, reason: e.reason, verdict: 'reassign', was: e.was }); store.corrections.push({ vec: bandVec, type: verdict, kind: 'pos', src: id }); tally.reassign++; }
 
@@ -88,7 +91,7 @@ const after = scoreStore(store);
 saveStore(storePath, store);
 
 console.log(`\napplied ${applied} corrections (${skipped} skipped)`);
-console.log(`  ${tally.correct} confirmed · ${tally.reassign} reassign · ${tally.new} new-type · ${tally.fragment} fragment · ${tally.split} split · ${tally.region} region exemplars`);
+console.log(`  ${tally.correct} confirmed · ${tally.reassign} reassign · ${tally.new} new-type · ${tally.fragment} fragment · ${tally.split} split · ${tally.notblock} not-block · ${tally.region} region exemplars`);
 console.log('\nstore types (prototypes / guards · learned radius):');
 for (const [type, t] of Object.entries(store.types).sort((a, b) => (b[1].prototypes.length) - (a[1].prototypes.length))) {
   const r = radiusOf(store, type);

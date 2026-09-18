@@ -41,12 +41,24 @@
   .badge.running, .badge.queued { background: #fff3d6; color: #8a6100; }
   .badge.error { background: #fbe3e0; color: #b0281a; }
   .run .del { float: right; color: #b00; background: none; border: none; font-size: 14px; cursor: pointer; padding: 0 2px; }
+  .run .rerender { float: right; color: var(--greenD); background: none; border: none; font-size: 15px; cursor: pointer; padding: 0 4px; line-height: 1; }
+  .run .rerender:hover { color: var(--green); }
   .empty { color: #999; font-style: italic; padding: 6px 2px; }
   .panel-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--line); }
   .panel-head h2 { margin: 0; }
   .panel-head .sp { flex: 1; }
   iframe { flex: 1; width: 100%; border: 0; background: var(--bg); }
   .placeholder { flex: 1; display: flex; align-items: center; justify-content: center; color: #aaa; font-size: 13px; }
+  .phead { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .phead h2 { margin: 0; }
+  .collapse-btn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 4px; }
+  .collapse-btn:hover { color: var(--ink); }
+  .rail { display: none; }
+  .panel.collapsed { padding: 0; overflow: hidden; }
+  .panel.collapsed > :not(.rail) { display: none; }
+  .panel.collapsed .rail { display: flex; align-items: flex-start; justify-content: center; height: 100%; padding-top: 12px; }
+  .rail .exp { writing-mode: vertical-rl; transform: rotate(180deg); background: none; border: none; color: var(--muted); cursor: pointer; font: 600 12px system-ui; letter-spacing: .04em; text-transform: uppercase; padding: 6px 2px; }
+  .rail .exp:hover { color: var(--green); }
 </style>
 </head>
 <body>
@@ -58,8 +70,9 @@
 
   <div class="layout">
     <!-- New run -->
-    <section class="panel">
-      <h2>New scope run</h2>
+    <section class="panel" id="formPanel">
+      <div class="rail"><button class="exp" data-col="form" title="Expand">New scope run ›</button></div>
+      <div class="phead"><h2 style="flex:1">New scope run</h2><button class="collapse-btn" data-col="form" title="Collapse">‹</button></div>
       <label class="field">
         <span>Label <em>(optional)</em></span>
         <input id="label" type="text" placeholder="e.g. usta-foundation" spellcheck="false">
@@ -86,10 +99,12 @@
     </section>
 
     <!-- Runs history -->
-    <section class="panel">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-        <h2 style="margin:0;flex:1">Runs</h2>
+    <section class="panel" id="runsPanel">
+      <div class="rail"><button class="exp" data-col="runs" title="Expand">Runs ›</button></div>
+      <div class="phead">
+        <h2 style="flex:1">Runs</h2>
         <button id="refresh" class="link">Refresh</button>
+        <button class="collapse-btn" data-col="runs" title="Collapse">‹</button>
       </div>
       <div id="runs" class="runs"></div>
     </section>
@@ -171,6 +186,7 @@
       if (r.blockCount != null) counts.push(r.blockCount + ' block types');
       el.innerHTML =
         '<button class="del" title="Delete run">✕</button>' +
+        (r.corpus && (st === 'done' || st === 'error') ? '<button class="rerender" title="Re-render the inventory with the latest tool + your saved corrections">↻</button>' : '') +
         '<div class="site">' + esc(r.label || r.siteHost || r.id.slice(0, 8)) + '</div>' +
         '<div class="meta">' +
           '<span class="badge ' + st + '">' + st + (st !== 'done' && st !== 'error' && r.stage ? ' · ' + esc(r.stage) : '') + '</span>' +
@@ -179,8 +195,9 @@
           '<span>' + when + '</span>' +
         '</div>' +
         (r.error ? '<div class="meta" style="color:#b0281a">' + esc(String(r.error).slice(0, 160)) + '</div>' : '');
-      el.onclick = function (ev) { if (ev.target.classList.contains('del')) return; open_(r.id); };
+      el.onclick = function (ev) { if (ev.target.classList.contains('del') || ev.target.classList.contains('rerender')) return; open_(r.id); };
       el.querySelector('.del').onclick = function () { del(r.id); };
+      var rr = el.querySelector('.rerender'); if (rr) rr.onclick = function () { rerender(r); };
       runsEl.appendChild(el);
     });
   }
@@ -190,6 +207,25 @@
       if (activeId === id) { activeId = null; showFrame(null); }
       refresh();
     });
+  }
+
+  // Re-render a run's inventory with the current tool code, re-applying its saved corrections as
+  // overrides (no re-learning). The inventory is a static file baked at scope time, so this is how a
+  // past run picks up UI/logic changes without a full re-scan.
+  function rerender(r) {
+    // Re-render applies the run's server-side (absorbed) corrections as overrides — no need to send
+    // the local flags; pending, un-analyzed marks stay pending until you Analyze them.
+    if (activeId === r.id) { showFrame(null); resPh.textContent = 'Re-rendering…'; }
+    fetch('/api/scoper/scope', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ corpus: r.corpus, label: r.label }) })
+      .then(function (x) { return x.json(); }).then(function (j) { if (j.jobId) pollRerender(j.jobId, r.id); })
+      .catch(function () { refresh(); });
+  }
+  function pollRerender(jobId, runId) {
+    fetch('/api/scoper/runs/' + jobId).then(function (x) { return x.json(); }).then(function (j) {
+      if (j.status === 'done') { refresh().then(function () { if (activeId === runId) open_(runId); }); }
+      else if (j.status === 'error') { refresh(); if (activeId === runId) { showFrame(null); resPh.textContent = 'Re-render failed: ' + (j.error || ''); } }
+      else { setTimeout(function () { pollRerender(jobId, runId); }, 800); }
+    }).catch(function () { setTimeout(function () { pollRerender(jobId, runId); }, 1200); });
   }
 
   // --- Open a run's inventory ---
@@ -220,6 +256,22 @@
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
   $('refresh').onclick = refresh;
+
+  // --- Collapsible left columns (give the inventory more room) ---
+  var collapsed = { form: false, runs: false };
+  function updateGrid() {
+    document.querySelector('.layout').style.gridTemplateColumns =
+      (collapsed.form ? '34px' : '340px') + ' ' + (collapsed.runs ? '34px' : '300px') + ' 1fr';
+  }
+  document.querySelectorAll('[data-col]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var k = btn.dataset.col;
+      collapsed[k] = !collapsed[k];
+      $(k === 'form' ? 'formPanel' : 'runsPanel').classList.toggle('collapsed', collapsed[k]);
+      updateGrid();
+    });
+  });
+
   refresh();
 </script>
 </body>

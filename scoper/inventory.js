@@ -100,7 +100,7 @@ function applyOverrides(items, pears, overrides) {
     const c = overrides[`${path.basename(it.dir)}_${Math.round(it.y0)}`];
     if (!c) continue;
     const v = c.type || '';
-    if (v === '__fragment__' || v === '__split__') remove.add(it); // over-cut piece or over-fused conglomerate — its regions carry the truth
+    if (v === '__fragment__' || v === '__split__' || v === '__notblock__') remove.add(it); // over-cut piece, over-fused conglomerate, or wrongly-admitted default — drop from the inventory
     else if (v === '__new__') it.subtype = c.newName || '(unnamed)';
     else if (v === '__ok__') { /* confirmed as detected — affirm, no relabel */ }
     else if (v) it.subtype = v;

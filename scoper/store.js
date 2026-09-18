@@ -15,6 +15,7 @@ const { vecDist, FKEYS } = require('./features');
 const TAU_ADAPT = 0.22; // within this of an existing prototype of the type -> adapt (don't spawn)
 const TAU_TYPE = 0.50;  // DEFAULT per-type acceptance radius (cold start; retune() overrides from data)
 const TAU_GUARD = 0.25; // a negative of the winning type within this -> guard fires (suppress)
+const TAU_ADMIT = 0.35; // a band the HEURISTICS reject is admitted only within this (tight) of a learned prototype
 const RADIUS_CAP = 1.20;    // a learned per-type radius never exceeds this (bounds sparse-data widening)
 const MIN_POS_TO_TUNE = 2;  // widen a type's radius past TAU_TYPE only once it has >=2 positive corrections
 
@@ -81,7 +82,9 @@ function addExemplar(store, type, vec, meta = {}) {
 
 function addNegative(store, type, vec, meta = {}) {
   const t = ensureType(store, type);
-  t.negatives.push({ v: vec });
+  // kind 'fragment' = an over-cut piece (drives the merge); 'default' = "not a block at all" (a ✕ Not
+  // a block correction — suppresses admission but must NOT trigger a merge). Both suppress typing.
+  t.negatives.push({ v: vec, kind: meta.kind || 'fragment' });
   t.provenance.push({ ...meta, negative: true });
 }
 
@@ -90,9 +93,9 @@ function addNegative(store, type, vec, meta = {}) {
 // is the trigger the band-merge uses to decide which bands to try re-joining.
 function nearNegative(store, vec) {
   for (const [type, t] of Object.entries(store.types || {})) {
-    for (const n of (t.negatives || [])) if (vecDist(vec, n.v) <= TAU_GUARD) return type;
+    for (const n of (t.negatives || [])) if ((n.kind || 'fragment') === 'fragment' && vecDist(vec, n.v) <= TAU_GUARD) return type;
   }
-  return null;
+  return null; // only FRAGMENT guards trigger the merge; 'default' guards suppress typing but not merge
 }
 
 // regression guard: re-type every accumulated labeled correction and report accuracy.
@@ -179,4 +182,4 @@ function retune(store) {
   return { before, after: score(radii), radii };
 }
 
-module.exports = { emptyStore, loadStore, saveStore, typeOf, classifyWith, radiusOf, addExemplar, addNegative, nearNegative, scoreStore, retune, ensureType, TAU_ADAPT, TAU_TYPE, TAU_GUARD, RADIUS_CAP, MIN_POS_TO_TUNE };
+module.exports = { emptyStore, loadStore, saveStore, typeOf, classifyWith, radiusOf, addExemplar, addNegative, nearNegative, scoreStore, retune, ensureType, TAU_ADAPT, TAU_TYPE, TAU_GUARD, TAU_ADMIT, RADIUS_CAP, MIN_POS_TO_TUNE };

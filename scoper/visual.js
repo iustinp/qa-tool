@@ -57,6 +57,7 @@ async function buildVisual(inv, opts = {}) {
   const pageBands = {};
   const pageCuts = {};
   const pngHBySlug = {};
+  const dprBySlug = {};
   const cutGate = (c) => c.strength >= 18 || c.cov >= 0.55; // strength OR coverage (asymmetric heroes read low cov)
   for (const t of inv) {
     for (const o of t.occurrences) {
@@ -68,8 +69,21 @@ async function buildVisual(inv, opts = {}) {
       }
       const pngH = pngHBySlug[slug];
       if (!pngH) continue;
-      const dpr = o.dpr || 1;
-      (pageBands[slug] = pageBands[slug] || []).push({ id: idOf(o), top: +((o.y0 * dpr) / pngH).toFixed(4), bot: +((o.y1 * dpr) / pngH).toFixed(4), type: t.subtype });
+      const dpr = o.dpr || 1; dprBySlug[slug] = dpr;
+      (pageBands[slug] = pageBands[slug] || []).push({ id: idOf(o), top: +((o.y0 * dpr) / pngH).toFixed(4), bot: +((o.y1 * dpr) / pngH).toFixed(4), type: t.subtype, cls: 'block' });
+    }
+  }
+  // Add the IGNORED bands (default + chrome) so the modal shows what the tool left at the gate — you
+  // can see its whole read of the page and draw over anything it wrongly discarded. (Only for pages
+  // that have a detected block, i.e. are openable.)
+  if (opts.allBands) {
+    for (const slug of Object.keys(pageBands)) {
+      const pngH = pngHBySlug[slug], dpr = dprBySlug[slug] || 1;
+      if (!pngH) continue;
+      for (const b of (opts.allBands[slug] || [])) {
+        if (b.cls === 'block') continue; // blocks already added (from occurrences, with matching ids)
+        pageBands[slug].push({ id: `${slug}_${Math.round(b.y0)}`, top: +((b.y0 * dpr) / pngH).toFixed(4), bot: +((b.y1 * dpr) / pngH).toFixed(4), type: b.subtype, cls: b.cls });
+      }
     }
   }
 
@@ -105,7 +119,7 @@ async function buildVisual(inv, opts = {}) {
     cols.push({ type: t.subtype, pages: t.pages, instances: t.instances, signature: t.signature, items, total: t.occurrences.length });
   }
 
-  const opt = ['<option value="">— untouched (no judgement) —</option>', '<option value="__ok__">✓ Correct (confirm this type)</option>', '<option value="__fragment__">⧉ Fragment of a larger block</option>', '<option value="__split__">⊟ Over-fused (contains multiple blocks)</option>', '<option value="__new__">➕ New block type…</option>']
+  const opt = ['<option value="">— untouched (no judgement) —</option>', '<option value="__ok__">✓ Correct (confirm this type)</option>', '<option value="__notblock__">✕ Not a block (default content)</option>', '<option value="__fragment__">⧉ Fragment of a larger block</option>', '<option value="__split__">⊟ Over-fused (contains multiple blocks)</option>', '<option value="__new__">➕ New block type…</option>']
     .concat(VOCAB.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`)).join('');
   const fadePct = (f) => (Math.max(0, Math.min(1, f)) * 100).toFixed(1);
   const colHtml = cols.map((c) => `
@@ -157,6 +171,7 @@ async function buildVisual(inv, opts = {}) {
     .inst.fragment{border-color:#0f9aa8;box-shadow:0 0 0 2px rgba(15,154,168,.22)}
     .inst.ok{border-color:#1a9e6a;box-shadow:0 0 0 2px rgba(26,158,106,.22)}
     .inst.split{border-color:#c0663d;box-shadow:0 0 0 2px rgba(192,102,61,.25)}
+    .inst.notblock{border-color:#888;box-shadow:0 0 0 2px rgba(120,120,120,.25);opacity:.7}
     .crop{position:relative;cursor:zoom-in;border:1px solid #eee;border-radius:4px;overflow:hidden;background:#fafafa}
     .crop img{width:100%;display:block}
     .fade{position:absolute;left:0;right:0;background:rgba(247,248,250,.66);pointer-events:none}
@@ -180,7 +195,7 @@ async function buildVisual(inv, opts = {}) {
     .mhead .msp{flex:1}
     .mbody{flex:1;display:flex;min-height:0}
     .mstage{flex:1;overflow:auto;background:#4a4f57;position:relative;padding:14px}
-    .mwrap{position:relative;cursor:crosshair;width:760px;max-width:100%;margin:0 auto}
+    .mwrap{position:relative;cursor:crosshair;width:760px;margin:0 auto}
     .mwrap img{display:block;width:100%}
     #mboxes{position:absolute;inset:0}
     .mband{position:absolute;border:2px solid #17c1d6;background:rgba(23,193,214,.14);pointer-events:none}
@@ -189,15 +204,33 @@ async function buildVisual(inv, opts = {}) {
     .mband.sib .lbl{background:#e7e9ee;color:#555}
     .mband.sib.claimed{border-color:#e06a00;background:rgba(224,106,0,.10)}
     .mband.sib.claimed .lbl{background:#e06a00;color:#fff}
+    .mband.ignored{border:1px dashed #a8a8a8;background:rgba(140,140,140,.10)}
+    .mband.ignored .lbl{background:#8f8f8f;color:#fff}
+    .mband.chromeband{border:1px dotted #c2a8a8;background:rgba(150,120,120,.06)}
+    .mband.chromeband .lbl{background:#b09a9a;color:#3a2020}
     .mcut{position:absolute;left:0;width:100%;height:0;border-top:2px dashed #16a34a;pointer-events:none}
     .mcut .clbl{position:absolute;right:0;top:-16px;background:#16a34a;color:#fff;font:700 10px ui-monospace;padding:0 4px;border-radius:3px}
-    .rbox{position:absolute;border:2px solid #e06a00;background:rgba(224,106,0,.12)}
-    .rbox.sel{border-color:#6a3fd0;background:rgba(106,63,208,.16)}
+    .rbox{position:absolute;border:2px solid #e06a00;background:rgba(224,106,0,.10)}
+    .rbox.sel{box-shadow:inset 0 0 0 2px #e0a800}
     .rbox .rlbl{position:absolute;top:-17px;left:0;background:#e06a00;color:#fff;font:700 10px ui-monospace;padding:0 4px;border-radius:3px;white-space:nowrap}
+    .rbox.sel .rlbl{background:#c98a00}
+    /* handles sit just INSIDE the edge, thin; a faint gold marker that brightens+thickens on hover/drag */
+    .rhandle{position:absolute;z-index:5;background:rgba(224,168,0,.35)}
+    .rhandle:hover,.rhandle.drag{background:#e0a800}
+    .rhandle.h-n{top:0;left:0;right:0;height:5px;cursor:ns-resize}
+    .rhandle.h-s{bottom:0;left:0;right:0;height:5px;cursor:ns-resize}
+    .rhandle.h-w{left:0;top:0;bottom:0;width:5px;cursor:ew-resize}
+    .rhandle.h-e{right:0;top:0;bottom:0;width:5px;cursor:ew-resize}
+    .rhandle.h-n:hover,.rhandle.h-n.drag{height:8px} .rhandle.h-s:hover,.rhandle.h-s.drag{height:8px}
+    .rhandle.h-w:hover,.rhandle.h-w.drag{width:8px} .rhandle.h-e:hover,.rhandle.h-e.drag{width:8px}
     .mside{width:330px;border-left:1px solid #eee;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:12px}
     .mhint{color:#666;margin:0;font-size:12px;line-height:1.4}
     .rgn{border:1px solid #eee;border-radius:6px;padding:8px;display:flex;flex-direction:column;gap:6px}
     .rgn.detected{border-color:#17c1d6;background:#f2fdff}
+    .rgn[data-i].sel{border-color:#e0a800;box-shadow:0 0 0 2px rgba(224,168,0,.3)}
+    .zbtn{padding:4px 9px;font:600 13px system-ui}
+    .zlbl{font:600 11px ui-monospace;color:#666;min-width:38px;text-align:center}
+    .rgn[data-i] .rh{cursor:pointer}
     .rgn .rh{display:flex;align-items:center;gap:6px;font-weight:700;font-size:12px}
     .rgn .rh .rsp{flex:1}
     .rgn .del{color:#c00;cursor:pointer;border:none;background:none;font-size:16px;padding:0}`;
@@ -217,6 +250,10 @@ async function buildVisual(inv, opts = {}) {
       };
       function pollAnalyze(id,b){ fetch('/api/scoper/runs/'+id).then(function(r){return r.json();}).then(function(j){
         if(j.status==='done'){
+          // corrections are now absorbed (learned + persisted server-side as overrides) -> clear the
+          // local flags so the refreshed view shows the clean RESULT, not leftover annotations.
+          try { localStorage.removeItem(KEY); } catch(e){}
+          for (var kk in store) delete store[kk];
           var s=document.getElementById('status');
           s.textContent = j.summary || 'Learned. View the updated inventory.';
           s.className = 'learned';
@@ -244,15 +281,15 @@ async function buildVisual(inv, opts = {}) {
     function setStatus(){ document.getElementById('status').textContent = Object.keys(store).length + ' corrections stored'; }
     function ent(id){ return store[id] || (store[id] = {}); }
     function clean(id){ var e = store[id]; if (e && !e.type && !(e.regions && e.regions.length)) delete store[id]; }
-    function optionsHtml(sel){ var h = '<option value="">— untouched (no judgement) —</option><option value="__ok__"'+('__ok__'===sel?' selected':'')+'>✓ Correct (confirm this type)</option><option value="__fragment__"'+('__fragment__'===sel?' selected':'')+'>⧉ Fragment of a larger block</option><option value="__split__"'+('__split__'===sel?' selected':'')+'>⊟ Over-fused (contains multiple blocks)</option><option value="__new__"'+('__new__'===sel?' selected':'')+'>➕ New block type…</option>'; for (var i=0;i<VOCAB.length;i++){ h += '<option value="'+VOCAB[i]+'"'+(VOCAB[i]===sel?' selected':'')+'>'+VOCAB[i]+'</option>'; } return h; }
+    function optionsHtml(sel){ var h = '<option value="">— untouched (no judgement) —</option><option value="__ok__"'+('__ok__'===sel?' selected':'')+'>✓ Correct (confirm this type)</option><option value="__notblock__"'+('__notblock__'===sel?' selected':'')+'>✕ Not a block (default content)</option><option value="__fragment__"'+('__fragment__'===sel?' selected':'')+'>⧉ Fragment of a larger block</option><option value="__split__"'+('__split__'===sel?' selected':'')+'>⊟ Over-fused (contains multiple blocks)</option><option value="__new__"'+('__new__'===sel?' selected':'')+'>➕ New block type…</option>'; for (var i=0;i<VOCAB.length;i++){ h += '<option value="'+VOCAB[i]+'"'+(VOCAB[i]===sel?' selected':'')+'>'+VOCAB[i]+'</option>'; } return h; }
 
     // ---- main-page instance sync ----
     function renderInst(inst){
       var id = inst.dataset.id, e = store[id] || {};
       var sel = inst.querySelector('select.fix');
       sel.value = e.type || '';
-      var isNew = e.type === '__new__', isFrag = e.type === '__fragment__', isSplit = e.type === '__split__', isOk = e.type === '__ok__', has = !!e.type;
-      var isType = has && !isNew && !isFrag && !isSplit && !isOk;
+      var isNew = e.type === '__new__', isFrag = e.type === '__fragment__', isSplit = e.type === '__split__', isNB = e.type === '__notblock__', isOk = e.type === '__ok__', has = !!e.type;
+      var isType = has && !isNew && !isFrag && !isSplit && !isNB && !isOk;
       inst.querySelector('.detail').style.display = (has && !isOk) ? 'flex' : 'none';
       inst.querySelector('.newfields').style.display = isNew ? 'flex' : 'none';
       inst.querySelector('.reason').value = e.reason || '';
@@ -262,9 +299,10 @@ async function buildVisual(inv, opts = {}) {
       inst.classList.toggle('newtype', isNew);
       inst.classList.toggle('fragment', isFrag);
       inst.classList.toggle('split', isSplit);
+      inst.classList.toggle('notblock', isNB);
       inst.classList.toggle('ok', isOk);
       var nr = (e.regions && e.regions.length) || 0, parts = [];
-      if (isFrag) parts.push('⧉ fragment'); else if (isSplit) parts.push('⊟ over-fused'); else if (isNew) parts.push('➕ ' + (e.newName || 'new type')); else if (isOk) parts.push('✓ confirmed'); else if (isType) parts.push('→ ' + e.type);
+      if (isFrag) parts.push('⧉ fragment'); else if (isSplit) parts.push('⊟ over-fused'); else if (isNB) parts.push('✕ not a block'); else if (isNew) parts.push('➕ ' + (e.newName || 'new type')); else if (isOk) parts.push('✓ confirmed'); else if (isType) parts.push('→ ' + e.type);
       if (nr) parts.push('✎ ' + nr + ' region' + (nr > 1 ? 's' : ''));
       inst.querySelector('.badge').textContent = parts.join(' · ');
     }
@@ -298,18 +336,27 @@ async function buildVisual(inv, opts = {}) {
     var img = document.getElementById('mimg');
     var boxes = document.getElementById('mboxes');
     var side = document.getElementById('mregions');
+    // ---- zoom (buttons only; scrolling stays as pan). Everything overlaid is %-based so it scales. ----
+    var zoom = 1, baseW = 760;
+    function fitBase(){ var st=document.querySelector('.mstage'); baseW = Math.max(320, ((st&&st.clientWidth)||788) - 28); }
+    function applyZoom(){ wrap.style.maxWidth='none'; var w=Math.round(baseW*zoom); wrap.style.width=w+'px'; wrap.style.margin=(zoom>1.001?'0':'0 auto'); var zl=document.getElementById('zlbl'); if(zl) zl.textContent=Math.round(zoom*100)+'%'; }
+    document.getElementById('zin').onclick = function(){ zoom=Math.min(6, zoom*1.25); applyZoom(); };
+    document.getElementById('zout').onclick = function(){ zoom=Math.max(0.3, zoom/1.25); applyZoom(); };
+    document.getElementById('zfit').onclick = function(){ zoom=1; applyZoom(); };
     document.getElementById('mclose').onclick = closeModal;
     document.querySelector('.mback').onclick = closeModal;
     function closeModal(){ modal.style.display='none'; if (M.inst) renderInst(M.inst); M.inst=null; }
 
     function openModal(inst){
-      M.inst = inst; M.id = inst.dataset.id; M.sel = -1;
+      M.inst = inst; M.id = inst.dataset.id;
+      var er = store[M.id]; M.sel = (er && er.regions && er.regions.length) ? er.regions.length - 1 : -1; // auto-select last region so its resize handles show
       document.getElementById('mtitle').textContent = inst.dataset.col + '  —  ' + inst.dataset.url.replace(/^https?:\\/\\/[^/]+/, '');
       img.onload = drawBoxes;
       img.src = inst.dataset.full || '';
       if (img.complete) drawBoxes();
       renderRegions();
       modal.style.display = 'block';
+      fitBase(); zoom = 1; applyZoom(); // size the image to the now-available width
     }
     function slugOf(id){ return id.replace(/_\\d+$/, ''); }
     function siblingBands(){ return (PAGEBANDS[slugOf(M.id)] || []); }
@@ -323,7 +370,7 @@ async function buildVisual(inv, opts = {}) {
     // the user judged themselves is left alone; releasing the region un-claims them.
     function syncClaims(){
       siblingBands().forEach(function(b){
-        if (b.id === M.id) return; // the clicked band carries the region + its own fragment verdict
+        if (b.id === M.id || b.cls !== 'block') return; // only claim detected BLOCK siblings (not ignored bands)
         var e = store[b.id], covered = regionsCover(b.top, b.bot);
         if (covered){ if (!e || !e.type || e._auto){ store[b.id] = { type:'__fragment__', was:b.type, url:M.inst.dataset.url, _auto:true, _via:M.id }; } }
         else if (e && e._auto && e._via === M.id){ delete store[b.id]; }
@@ -336,24 +383,25 @@ async function buildVisual(inv, opts = {}) {
       var bt = parseFloat(M.inst.dataset.bandtop)||0, bb = parseFloat(M.inst.dataset.bandbot)||0;
       return (PAGECUTS[slugOf(M.id)]||[]).filter(function(c){ return c.y > bt + 0.004 && c.y < bb - 0.004; });
     }
-    // Snap a y (0..1 of page) to the nearest proposed cut or the band edges, within a small tolerance,
-    // so the reviewer doesn't have to draw precisely on the seam.
-    function snapY(y){
-      var bt = parseFloat(M.inst.dataset.bandtop)||0, bb = parseFloat(M.inst.dataset.bandbot)||0;
-      var targets = bandCuts().map(function(c){ return c.y; }).concat([bt, bb]);
-      var best = y, bd = 0.015;
-      targets.forEach(function(t){ var d = Math.abs(t - y); if (d < bd){ bd = d; best = t; } });
-      return best;
-    }
     function drawBoxes(){
       boxes.innerHTML = '';
-      // 1) every other block band on the page, faded — so the reviewer sees the full segmentation
+      // 1) every OTHER band on the page — detected blocks (claimable) AND the bands the tool IGNORED
+      //    (default/chrome), so you see its whole read of the page and can draw over a wrongly-dropped one.
       siblingBands().forEach(function(b){
         if (b.id === M.id) return;
-        var claimed = regionsCover(b.top, b.bot);
-        var s = document.createElement('div'); s.className = 'mband sib' + (claimed ? ' claimed' : '');
+        var s = document.createElement('div');
+        if (b.cls === 'block'){
+          var claimed = regionsCover(b.top, b.bot);
+          s.className = 'mband sib' + (claimed ? ' claimed' : '');
+          s.innerHTML = '<span class="lbl">'+b.type+(claimed?' · claimed':'')+'</span>';
+        } else if (b.cls === 'chrome'){
+          s.className = 'mband chromeband';
+          s.innerHTML = '<span class="lbl">chrome</span>';
+        } else {
+          s.className = 'mband ignored';
+          s.innerHTML = '<span class="lbl">ignored · '+(b.type||'default')+'</span>';
+        }
         s.style.left='0'; s.style.width='100%'; s.style.top=(b.top*100)+'%'; s.style.height=((b.bot-b.top)*100)+'%';
-        s.innerHTML = '<span class="lbl">'+b.type+(claimed?' · claimed':'')+'</span>';
         boxes.appendChild(s);
       });
       // 2) the clicked band (cyan)
@@ -367,7 +415,13 @@ async function buildVisual(inv, opts = {}) {
         var d = document.createElement('div'); d.className='rbox'+(i===M.sel?' sel':'');
         d.style.left=(r.x*100)+'%'; d.style.top=(r.y*100)+'%'; d.style.width=(r.w*100)+'%'; d.style.height=(r.h*100)+'%';
         d.innerHTML='<span class="rlbl">'+(r.type||'(unset)')+'</span>';
-        d.addEventListener('mousedown', function(ev){ ev.stopPropagation(); M.sel=i; drawBoxes(); renderRegions(); });
+        d.addEventListener('mousedown', function(ev){ ev.stopPropagation(); if (M.sel !== i){ M.sel=i; drawBoxes(); renderRegions(); } });
+        // only the SELECTED region gets edge handles; dragging a margin resizes it WITHOUT snapping
+        if (i === M.sel){ ['n','s','e','w'].forEach(function(edge){
+          var hd=document.createElement('div'); hd.className='rhandle h-'+edge;
+          hd.addEventListener('mousedown', function(ev){ ev.stopPropagation(); ev.preventDefault(); rzdrag={ i:i, edge:edge }; });
+          d.appendChild(hd);
+        }); }
         boxes.appendChild(d);
       });
       // 4) proposed cut lines inside this band (screenshot seams) — dashed green, drag/snap to them
@@ -386,7 +440,7 @@ async function buildVisual(inv, opts = {}) {
         + (e.type==='__new__' ? '<div class="newfields2"><input class="dn" placeholder="New block type name" value="'+(e.newName||'')+'"><textarea class="dc" rows="2" placeholder="Characteristics">'+(e.characteristics||'')+'</textarea></div>' : '')
         + '</div>';
       rs.forEach(function(r,i){
-        html += '<div class="rgn" data-i="'+i+'"><div class="rh">Region '+(i+1)+' <span class="rsp"></span><button class="del" title="delete">✕</button></div>'
+        html += '<div class="rgn'+(i===M.sel?' sel':'')+'" data-i="'+i+'"><div class="rh">Region '+(i+1)+(i===M.sel?' — selected':'')+' <span class="rsp"></span><button class="del" title="delete">✕</button></div>'
           + '<select class="rt">'+optionsHtml(r.type||'')+'</select>'
           + '<textarea class="rr" rows="2" placeholder="Because… (why is this the true block?)">'+(r.reason||'')+'</textarea>'
           + (r.type==='__new__' ? '<div class="newfields2"><input class="rn" placeholder="New block type name" value="'+(r.newName||'')+'"><textarea class="rc" rows="2" placeholder="Characteristics">'+(r.characteristics||'')+'</textarea></div>' : '')
@@ -402,6 +456,8 @@ async function buildVisual(inv, opts = {}) {
       // region forms
       side.querySelectorAll('.rgn[data-i]').forEach(function(el){
         var i = +el.dataset.i, e = store[M.id], r = e.regions[i];
+        // clicking the region's header selects it (and reveals its resize handles on the box)
+        el.querySelector('.rh').addEventListener('mousedown', function(ev){ if (ev.target.classList.contains('del')) return; if (M.sel !== i){ M.sel=i; renderRegions(); drawBoxes(); } });
         el.querySelector('.rt').onchange = function(){ r.type = this.value; save(); renderRegions(); drawBoxes(); };
         el.querySelector('.rr').oninput = function(){ r.reason = this.value.trim(); save(); };
         var rn = el.querySelector('.rn'); if (rn) rn.oninput = function(){ r.newName = this.value.trim(); save(); };
@@ -411,6 +467,7 @@ async function buildVisual(inv, opts = {}) {
     }
     // draw a new rectangle by dragging on the page
     var drag = null;
+    var rzdrag = null; // resizing the SELECTED region by a margin handle (no snapping)
     wrap.addEventListener('mousedown', function(ev){
       if (ev.target.closest && ev.target.closest('.rbox')) return; // clicking an existing region selects it
       var rect = wrap.getBoundingClientRect();
@@ -418,8 +475,18 @@ async function buildVisual(inv, opts = {}) {
       ev.preventDefault();
     });
     window.addEventListener('mousemove', function(ev){
-      if (!drag) return;
       var rect = wrap.getBoundingClientRect();
+      if (rzdrag){ // live-resize the selected region from the dragged edge; NO snap
+        var e=store[M.id], r=e&&e.regions&&e.regions[rzdrag.i]; if(!r){ rzdrag=null; return; }
+        var px=Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width)), py=Math.max(0,Math.min(1,(ev.clientY-rect.top)/rect.height));
+        if (rzdrag.edge==='n'){ var bot=r.y+r.h; r.y=Math.min(py,bot-0.005); r.h=bot-r.y; }
+        else if (rzdrag.edge==='s'){ r.h=Math.max(0.005, py-r.y); }
+        else if (rzdrag.edge==='w'){ var rt=r.x+r.w; r.x=Math.min(px,rt-0.01); r.w=rt-r.x; }
+        else if (rzdrag.edge==='e'){ r.w=Math.max(0.01, px-r.x); }
+        drawBoxes();
+        return;
+      }
+      if (!drag) return;
       var x1=(ev.clientX-rect.left)/rect.width, y1=(ev.clientY-rect.top)/rect.height;
       var x=Math.max(0,Math.min(drag.x0,x1)), y=Math.max(0,Math.min(drag.y0,y1));
       var w=Math.min(1,Math.max(drag.x0,x1))-x, h=Math.min(1,Math.max(drag.y0,y1))-y;
@@ -428,12 +495,15 @@ async function buildVisual(inv, opts = {}) {
       drag.cur={x:x,y:y,w:w,h:h};
     });
     window.addEventListener('mouseup', function(){
+      if (rzdrag){ // finish a margin resize: round + persist, no verdict change
+        var e=store[M.id], r=e&&e.regions&&e.regions[rzdrag.i]; rzdrag=null;
+        if (r){ r.x=+r.x.toFixed(4); r.y=+r.y.toFixed(4); r.w=+r.w.toFixed(4); r.h=+r.h.toFixed(4); }
+        save(); syncClaims(); drawBoxes(); renderRegions();
+        return;
+      }
       if (!drag) return;
       var d = drag; drag = null;
-      if (d.cur && d.cur.w>0.02 && d.cur.h>0.01){
-        // snap top & bottom edges to the nearest proposed cut / band edge (imprecise drawing is fine)
-        var yTop = snapY(d.cur.y), yBot = snapY(d.cur.y + d.cur.h);
-        if (yBot - yTop > 0.005){ d.cur.y = yTop; d.cur.h = yBot - yTop; }
+      if (d.cur && d.cur.w>0.01 && d.cur.h>0.003){ // no snapping — draw exactly what you drag (thin rects OK); zoom in for precision
         var e = ent(M.id); e.url=M.inst.dataset.url; e.was=M.inst.dataset.col; if(!e.regions) e.regions=[];
         e.regions.push({ x:+d.cur.x.toFixed(4), y:+d.cur.y.toFixed(4), w:+d.cur.w.toFixed(4), h:+d.cur.h.toFixed(4), type:'', reason:'' });
         // auto-classify the verdict from geometry (only if none chosen; a region elsewhere leaves it):
@@ -465,11 +535,14 @@ async function buildVisual(inv, opts = {}) {
     <div class="modal" id="modal">
       <div class="mback"></div>
       <div class="mbox">
-        <div class="mhead"><b id="mtitle"></b><span class="msp"></span><button id="mclose">Close ✕</button></div>
+        <div class="mhead"><b id="mtitle"></b><span class="msp"></span>
+          <button class="zbtn" id="zout" title="Zoom out">−</button><span class="zlbl" id="zlbl">100%</span><button class="zbtn" id="zin" title="Zoom in">+</button><button class="zbtn" id="zfit" title="Fit width">Fit</button>
+          <button id="mclose">Close ✕</button></div>
         <div class="mbody">
           <div class="mstage"><div class="mwrap" id="mwrap"><img id="mimg"><div id="mboxes"></div></div></div>
           <div class="mside">
-            <p class="mhint">Drag on the page to draw the <b>true</b> block region(s), then set each one's type + reason. The <b style="color:#0aa">cyan</b> box is what the tool detected. Edits here sync with the main page.</p>
+            <p class="mhint">Drag on the page to draw the <b>true</b> block region(s), then set each one's type + reason. The <b style="color:#0aa">cyan</b> box is what the tool detected; <b style="color:#888">gray dashed</b> bands are what it <b>ignored</b> (default/chrome) — draw over one to teach it as a block; <b style="color:#16a34a">green</b> lines are suggested cut points. Drawing is freehand — <b>zoom in</b> for thin regions.</p>
+            <p class="mhint">Click a region (box or its card) to <b>select</b> it — the selected region shows a <b style="color:#c98a00">gold</b> ring and draggable edge handles. Drag an edge to resize.</p>
             <div id="mregions"></div>
           </div>
         </div>

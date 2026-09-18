@@ -17,19 +17,25 @@
 const { descriptor } = require('./signature');
 const { bandCut } = require('./band-cut');
 const { tokenStats, featureVector } = require('./features');
-const { typeOf } = require('./store');
+const { typeOf, TAU_ADMIT } = require('./store');
 const { mergeSegments } = require('./merge');
 
 // Deterministic EDS-ish block subtype from content-blind signals (Step-1 typing, no AI):
 // image-repetition + axis (cards/gallery/grid), size tiers (stats), width + display heading (hero),
 // column count (columns). Accordion/Tabs/Carousel need affordance/overflow signals — deferred.
 function subtypeOf(x) {
-  const { ts, texts, imgs, imgRow, wideImg, display } = x;
+  const { ts, texts, imgs, imgRow, wideImg, display, toggles = 0, tabsLike = false } = x;
   const repeatedText = ts.filter((s) => !s.isImg && s.cols >= 2 && s.count >= 2);
   const cols = repeatedText.reduce((m, s) => Math.max(m, s.cols), 0);
 
   // Hero / banner — a wide (near-full-bleed) image + a display heading, and NOT a card grid.
+  // (Checked before toggles so stray header-nav dropdown toggles bleeding into the top band don't steal it.)
   if (wideImg && display && !(imgRow && imgRow.count >= 3)) return { subtype: 'Hero', why: 'wide image + display heading' };
+
+  // Toggle affordance (aria-expanded/controls) — accordion/tabs. Require >=3 so a couple of nav
+  // dropdown toggles don't read as an accordion; >=3 in a horizontal row = Tabs, else Accordion.
+  if (toggles >= 3 && tabsLike) return { subtype: 'Tabs', why: `${toggles} toggles in a row` };
+  if (toggles >= 3) return { subtype: 'Accordion', why: `toggle ×${toggles}` };
 
   // Image-repeating peers — Cards (image + repeated text) vs Gallery (image-dominant, ~no text).
   if (imgRow) {
@@ -54,7 +60,7 @@ function subtypeOf(x) {
 
 // bandNodes: this band's pear nodes. keyBucket: from chrome.classifyDescriptors(allPears).
 // pageNodes: the full page's nodes (needed to compute each node's cross-page descriptor).
-function classifyBand(bandNodes, keyBucket, pageNodes, store) {
+function classifyBand(bandNodes, keyBucket, pageNodes, store, clickables = []) {
   // 1) chrome — dominated by identical-across-pages boilerplate (header/footer/nav/share). Checked
   //    FIRST because nav/share also repeat across columns and would otherwise look like a block.
   //    Only the CHROME bucket counts (once-per-page site frame); LABEL is deliberately EXCLUDED —
@@ -83,19 +89,32 @@ function classifyBand(bandNodes, keyBucket, pageNodes, store) {
   const wideImg = imgs.find((n) => n.w >= 0.6 * pageW && Math.min(n.w, n.h) >= IMG_FLOOR);
   const display = ts.find((s) => !s.isImg && s.size >= DISPLAY);
 
-  if (!(imgRow || textGrid || multiCol.length >= 2 || (wideImg && display))) {
-    // 3) default content — prose / lone heading / lone image (scoping discards this)
-    const why = texts.length >= 4 ? 'prose' : (texts.length <= 2 && imgs.length <= 1 ? 'heading/lone' : 'default');
-    return { cls: 'default', subtype: 'default content', why };
-  }
-  // store-first typing (Step 2): the nearest learned prototype wins when confident; else the
-  // deterministic heuristic. Negative guards in the store can suppress a wrong learned type.
-  if (store && store.types && Object.keys(store.types).length) {
-    const r = typeOf(store, featureVector(bandNodes, pageW));
+  // AFFORDANCE (cold-start signal): a real toggle (accordion/tabs) or a CTA button marks a DESIGNED
+  // block, no repetition needed. Bare links are excluded (nav/prose are links); a CTA is type
+  // action/button, or a link with a button-ish standalone box. A CTA counts only alongside content.
+  const toggles = clickables.filter((c) => c.type === 'toggle');
+  const ctas = clickables.filter((c) => c.type === 'action' || c.type === 'button'
+    || (c.type === 'link' && c.h >= 28 && c.w >= 56 && c.w <= 0.5 * pageW));
+  const tabsLike = toggles.length >= 3 && (Math.max(...toggles.map((t) => t.y)) - Math.min(...toggles.map((t) => t.y)) < 40);
+  const hasContent = imgs.length >= 1 || !!display || texts.length >= 3;
+  const affordance = toggles.length >= 3 || (ctas.length >= 1 && hasContent);
+
+  const heuristicBlock = imgRow || textGrid || multiCol.length >= 2 || (wideImg && display) || affordance;
+  const r = (store && store.types && Object.keys(store.types).length) ? typeOf(store, featureVector(bandNodes, pageW)) : { type: null };
+
+  if (heuristicBlock) {
+    // an already-block band: the store re-types it at its learned radius (or the heuristic names it)
     if (r.type) return { cls: 'block', subtype: r.type, why: `learned (d=${r.dist.toFixed(2)})` };
+    const { subtype, why } = subtypeOf({ ts, texts, imgs, imgRow, wideImg, display, toggles: toggles.length, tabsLike });
+    return { cls: 'block', subtype, why };
   }
-  const { subtype, why } = subtypeOf({ ts, texts, imgs, imgRow, wideImg, display });
-  return { cls: 'block', subtype, why };
+  // LEARNED ADMISSION (Step 2): a band the heuristics would DROP is still admitted if it CONFIDENTLY
+  // matches a learned prototype (taught by drawing a region over a previously-ignored structure).
+  // Admission uses a TIGHT threshold (much tighter than the learned radius) so a wide radius can't
+  // flood prose in; a ✕-Not-a-block guard (a stored negative) suppresses via typeOf.
+  if (r.type && r.dist <= TAU_ADMIT) return { cls: 'block', subtype: r.type, why: `learned-admit (d=${r.dist.toFixed(2)})` };
+  const why = texts.length >= 4 ? 'prose' : (texts.length <= 2 && imgs.length <= 1 ? 'heading/lone' : 'default');
+  return { cls: 'default', subtype: 'default content', why };
 }
 
 function classifyPage(page, keyBucket, opts = {}) {
@@ -106,7 +125,8 @@ function classifyPage(page, keyBucket, opts = {}) {
   return bands.map((b) => {
     const bn = page.nodes.filter((n) => (n.y + n.h) > b.y0 && n.y < b.y1);
     if (b.forcedType) return { ...b, cls: 'block', subtype: b.forcedType, why: `merged ×${b.mergedFrom} (learned)`, bandNodeCount: bn.length };
-    return { ...b, ...classifyBand(bn, keyBucket, page.nodes, opts.store), bandNodeCount: bn.length };
+    const bandClk = (page.clickables || []).filter((c) => (c.y + c.h) > b.y0 && c.y < b.y1);
+    return { ...b, ...classifyBand(bn, keyBucket, page.nodes, opts.store, bandClk), bandNodeCount: bn.length };
   });
 }
 
