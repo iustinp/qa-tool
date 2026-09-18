@@ -18,6 +18,7 @@ const TAU_GUARD = 0.25; // a negative of the winning type within this -> guard f
 const TAU_ADMIT = 0.35; // a band the HEURISTICS reject is admitted only within this (tight) of a learned prototype
 const RADIUS_CAP = 1.20;    // a learned per-type radius never exceeds this (bounds sparse-data widening)
 const MIN_POS_TO_TUNE = 2;  // widen a type's radius past TAU_TYPE only once it has >=2 positive corrections
+const TAU_ADMIT_CAP = 0.50; // the learned admission threshold never widens past the cold type radius
 
 const emptyStore = () => ({ version: 1, types: {}, corrections: [] });
 const loadStore = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return emptyStore(); } };
@@ -182,4 +183,49 @@ function retune(store) {
   return { before, after: score(radii), radii };
 }
 
-module.exports = { emptyStore, loadStore, saveStore, typeOf, classifyWith, radiusOf, addExemplar, addNegative, nearNegative, scoreStore, retune, ensureType, TAU_ADAPT, TAU_TYPE, TAU_GUARD, TAU_ADMIT, RADIUS_CAP, MIN_POS_TO_TUNE };
+// tuneAdmit — the self-tuning of the LEARNED-ADMISSION threshold (band-class.js's learned-admit path),
+// the counterpart to retune() for admission. TAU_ADMIT was the last hand-picked constant deciding which
+// heuristically-rejected bands a learned prototype may pull back in; here it is FIT from the corrections
+// instead. The calibration set: positive exemplars (a real block SHOULD be admitted) vs 'default'-kind
+// negatives (a ✕ not-a-block SHOULD stay out). We sweep candidate thresholds and pick the one maximising
+// F1 = 2·TP / (2·TP + FP + FN), scored LEAVE-ONE-OUT (each vec's distance is to the nearest OTHER positive
+// correction, never itself, so a prototype it seeded can't give a trivially tight fit). Ties break toward
+// the TIGHTER threshold — admission errs on the side of precision. It only moves with real signal on both
+// sides (>=MIN_POS_TO_TUNE positives AND >=1 default negative); otherwise the conservative default holds,
+// so a store with no not-a-block feedback can never widen admission to flood prose in. Bounded by
+// TAU_ADMIT_CAP. Works identically for human and oracle (align.js) corrections.
+function tuneAdmit(store) {
+  const cur = typeof store.tauAdmit === 'number' ? store.tauAdmit : TAU_ADMIT;
+  const labels = (store.corrections || []).filter((l) => l.kind !== 'split');
+  const pos = labels.filter((l) => l.kind !== 'neg');
+  const rej = labels.filter((l) => l.kind === 'neg' && l.reject === 'default');
+  if (pos.length < MIN_POS_TO_TUNE || !rej.length) return { tau: cur, tuned: false, pos: pos.length, rej: rej.length };
+
+  // distance from a vec to the nearest OTHER positive correction (leave-one-out; selfIdx<0 = not a positive)
+  const dNear = (vec, selfIdx) => {
+    let m = Infinity;
+    pos.forEach((p, j) => { if (j === selfIdx) return; const d = vecDist(vec, p.vec); if (d < m) m = d; });
+    return m;
+  };
+  const dPos = pos.map((p, i) => dNear(p.vec, i));
+  const dRej = rej.map((r) => dNear(r.vec, -1));
+  const f1 = (tau) => {
+    let tp = 0, fp = 0, fn = 0;
+    dPos.forEach((d) => { if (d <= tau) tp++; else fn++; });
+    dRej.forEach((d) => { if (d <= tau) fp++; });
+    const den = 2 * tp + fp + fn; return den ? (2 * tp) / den : 0;
+  };
+  const cuts = new Set([TAU_ADMIT, cur]);
+  dPos.forEach((d) => { if (Number.isFinite(d)) cuts.add(d); });
+  dRej.forEach((d) => { if (Number.isFinite(d)) cuts.add(d); });
+  let best = { tau: cur, f: f1(cur) };
+  for (const c of cuts) {
+    if (c <= 0 || c > TAU_ADMIT_CAP) continue;
+    const f = f1(c);
+    if (f > best.f + 1e-9 || (Math.abs(f - best.f) < 1e-9 && c < best.tau)) best = { tau: c, f };
+  }
+  store.tauAdmit = best.tau;
+  return { tau: best.tau, f1: best.f, tuned: best.tau !== cur, pos: pos.length, rej: rej.length };
+}
+
+module.exports = { emptyStore, loadStore, saveStore, typeOf, classifyWith, radiusOf, addExemplar, addNegative, nearNegative, scoreStore, retune, tuneAdmit, ensureType, TAU_ADAPT, TAU_TYPE, TAU_GUARD, TAU_ADMIT, TAU_ADMIT_CAP, RADIUS_CAP, MIN_POS_TO_TUNE };

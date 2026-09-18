@@ -100,7 +100,9 @@ function classifyBand(bandNodes, keyBucket, pageNodes, store, clickables = []) {
   const affordance = toggles.length >= 3 || (ctas.length >= 1 && hasContent);
 
   const heuristicBlock = imgRow || textGrid || multiCol.length >= 2 || (wideImg && display) || affordance;
-  const r = (store && store.types && Object.keys(store.types).length) ? typeOf(store, featureVector(bandNodes, pageW)) : { type: null };
+  const hasStore = store && store.types && Object.keys(store.types).length;
+  const bandVec = hasStore ? featureVector(bandNodes, pageW) : null;
+  const r = bandVec ? typeOf(store, bandVec) : { type: null };
 
   if (heuristicBlock) {
     // an already-block band: the store re-types it at its learned radius (or the heuristic names it)
@@ -110,9 +112,14 @@ function classifyBand(bandNodes, keyBucket, pageNodes, store, clickables = []) {
   }
   // LEARNED ADMISSION (Step 2): a band the heuristics would DROP is still admitted if it CONFIDENTLY
   // matches a learned prototype (taught by drawing a region over a previously-ignored structure).
-  // Admission uses a TIGHT threshold (much tighter than the learned radius) so a wide radius can't
-  // flood prose in; a ✕-Not-a-block guard (a stored negative) suppresses via typeOf.
-  if (r.type && r.dist <= TAU_ADMIT) return { cls: 'block', subtype: r.type, why: `learned-admit (d=${r.dist.toFixed(2)})` };
+  // Admission uses a TIGHT threshold (much tighter than the learned radius, store.tuneAdmit fits it to
+  // maximise F1 over the corrections; else the cold TAU_ADMIT default) and a ✕-Not-a-block guard
+  // suppresses via typeOf. It ALSO requires STRUCTURAL evidence: a featureless prose-like band is never
+  // admitted even when a (featureless) text-block prototype sits right next to it — that proximity
+  // carries no signal, and content-blind vectors can't separate a text-only block from default prose.
+  const admit = store && typeof store.tauAdmit === 'number' ? store.tauAdmit : TAU_ADMIT;
+  const structured = bandVec && (bandVec.hasImage || bandVec.imgCols || bandVec.textCols || bandVec.textRows || bandVec.hasDisplay);
+  if (structured && r.type && r.dist <= admit) return { cls: 'block', subtype: r.type, why: `learned-admit (d=${r.dist.toFixed(2)})` };
   const why = texts.length >= 4 ? 'prose' : (texts.length <= 2 && imgs.length <= 1 ? 'heading/lone' : 'default');
   return { cls: 'default', subtype: 'default content', why };
 }

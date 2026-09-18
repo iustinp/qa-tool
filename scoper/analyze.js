@@ -21,7 +21,7 @@ const { loadPears } = require('./signature');
 const { classifyDescriptors } = require('./chrome');
 const { classifyPage } = require('./band-class');
 const { featureVector, nodesInBand, nodesInRect } = require('./features');
-const { loadStore, saveStore, addExemplar, addNegative, scoreStore, retune, radiusOf, TAU_TYPE } = require('./store');
+const { loadStore, saveStore, addExemplar, addNegative, scoreStore, retune, tuneAdmit, radiusOf, TAU_TYPE, TAU_ADMIT } = require('./store');
 
 const corrFile = process.argv[2];
 const pearsDir = process.argv[3];
@@ -67,14 +67,14 @@ for (const [id, e] of Object.entries(corrections)) {
   // base band (only its regions, below). This keeps a step-by-step reviewer from silently reinforcing
   // things they never judged.
   if (verdict === '__ok__') { addExemplar(store, e.was, bandVec, { url: e.url, reason: e.reason, verdict: 'confirmed' }); store.corrections.push({ vec: bandVec, type: e.was, kind: 'pos', src: id }); tally.correct++; }
-  else if (verdict === '__fragment__') { addNegative(store, e.was, bandVec, { url: e.url, reason: e.reason }); store.corrections.push({ vec: bandVec, srcType: e.was, kind: 'neg', src: id }); tally.fragment++; }
+  else if (verdict === '__fragment__') { addNegative(store, e.was, bandVec, { url: e.url, reason: e.reason }); store.corrections.push({ vec: bandVec, srcType: e.was, kind: 'neg', reject: 'fragment', src: id }); tally.fragment++; }
   // Over-fused: the band holds MULTIPLE blocks — its regions (below) carry the truth. We record it
   // inertly (kind 'split', ignored by scoring/merge) since we can't learn WHERE to cut without DOM
   // structure (Phase 2); the run is already corrected by the override dropping the band + adding regions.
   else if (verdict === '__split__') { store.corrections.push({ vec: bandVec, srcType: e.was, kind: 'split', src: id }); tally.split++; }
   // Not a block: the tool wrongly admitted default content — add a 'default'-kind guard so this shape
   // isn't admitted again (suppresses typing, does NOT trigger a merge), and count it as a negative.
-  else if (verdict === '__notblock__') { addNegative(store, e.was, bandVec, { url: e.url, reason: e.reason, kind: 'default' }); store.corrections.push({ vec: bandVec, srcType: e.was, kind: 'neg', src: id }); tally.notblock++; }
+  else if (verdict === '__notblock__') { addNegative(store, e.was, bandVec, { url: e.url, reason: e.reason, kind: 'default' }); store.corrections.push({ vec: bandVec, srcType: e.was, kind: 'neg', reject: 'default', src: id }); tally.notblock++; }
   else if (verdict === '__new__') { const n = e.newName || '(unnamed)'; addExemplar(store, n, bandVec, { url: e.url, reason: e.reason, characteristics: e.characteristics, verdict: 'new' }); store.corrections.push({ vec: bandVec, type: n, kind: 'pos', src: id }); tally.new++; }
   else if (verdict) { addExemplar(store, verdict, bandVec, { url: e.url, reason: e.reason, verdict: 'reassign', was: e.was }); store.corrections.push({ vec: bandVec, type: verdict, kind: 'pos', src: id }); tally.reassign++; }
 
@@ -90,8 +90,10 @@ for (const [id, e] of Object.entries(corrections)) {
   applied++;
 }
 
-// Self-tune: re-fit every type's acceptance radius to the accumulated corrections (see store.retune).
+// Self-tune: re-fit every type's acceptance radius to the accumulated corrections (see store.retune),
+// and re-fit the learned-admission threshold to maximise F1 over positives vs not-a-block negatives.
 const tune = retune(store);
+const admit = tuneAdmit(store);
 const after = scoreStore(store);
 saveStore(storePath, store);
 
@@ -103,6 +105,8 @@ for (const [type, t] of Object.entries(store.types).sort((a, b) => (b[1].prototy
   const tuned = Math.abs(r - TAU_TYPE) > 1e-6 ? `${r.toFixed(2)} (tuned)` : `${r.toFixed(2)} (default)`;
   console.log(`  ${String(t.prototypes.length).padStart(2)} proto · ${String((t.negatives || []).length)} guard · radius ${tuned}   ${type}`);
 }
+const admitTau = (typeof store.tauAdmit === 'number' ? store.tauAdmit : TAU_ADMIT);
+console.log(`\nlearned admission threshold: ${admitTau.toFixed(2)}${admit.tuned ? ` (tuned, F1 ${(admit.f1 * 100).toFixed(0)}% over ${admit.pos} pos / ${admit.rej} not-block)` : ` (default — need >=2 positives and >=1 not-block; have ${admit.pos}/${admit.rej})`}`);
 console.log(`\nself-tune — regression accuracy over ${after.n} accumulated corrections: ${(after.acc * 100).toFixed(0)}%  (was ${before.n ? (before.acc * 100).toFixed(0) + '%' : 'n/a'})`);
 if (before.n && after.acc < before.acc) console.log('  ⚠ accuracy DROPPED — a correction conflicts with earlier ones; review before trusting the store.');
 console.log(`\nstore -> ${storePath}`);

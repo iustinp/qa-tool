@@ -130,14 +130,18 @@ function alignCorpus(corpusDir, opts = {}) {
       corrections[hostId] = Object.assign(corrections[hostId] || {}, { url: pg.url, _auto: true, _via: 'eds-oracle', regions });
       if (!('type' in corrections[hostId])) corrections[hostId].type = '';
     }
-    // detected bands that are over-admissions / over-fusions -> negative structural verdicts
+    // detected bands that are over-admissions / over-fusions -> negative structural verdicts.
+    // covers===0 means the band matches NO ground-truth block: by the oracle's own definition it is not a
+    // block (default content, chrome, or over-cut prose), so it is a not-a-block negative — the exact
+    // signal tuneAdmit needs to tighten the learned-admission threshold (matching the scorecard precision).
     a.detected.forEach((d, di) => {
       const id = `${slug}_${Math.round(d.y0)}`;
       const c = a.detClass[di];
       if (c.covers >= 2) { // spans multiple GT blocks -> over-fused
         if (id === hostId) corrections[id].type = '__split__'; else corrections[id] = { type: '__split__', was: d.subtype, url: pg.url, _auto: true, _via: 'eds-oracle' };
-      } else if (c.covers === 0 && c.onDefault) { // admitted default content -> not a block
-        if (id === hostId) corrections[id].type = '__notblock__'; else corrections[id] = { type: '__notblock__', was: d.subtype, url: pg.url, _auto: true, _via: 'eds-oracle' };
+      } else if (c.covers === 0) { // matches no real block -> not a block
+        const via = c.onDefault ? 'eds-oracle:default' : 'eds-oracle:unmatched';
+        if (id === hostId) corrections[id].type = '__notblock__'; else corrections[id] = { type: '__notblock__', was: d.subtype, url: pg.url, _auto: true, _via: via };
       }
     });
 
