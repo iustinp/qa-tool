@@ -1057,7 +1057,10 @@ const server = http.createServer(async (req, res) => {
     if (scoperRun && req.method === 'GET') {
       const job = scoperJobs.get(scoperRun[1]);
       if (!job) return sendJson(res, 404, { error: 'not found' });
-      return sendJson(res, 200, scoperView(job));
+      // Single-run detail includes the URL list (the runs LIST omits it to stay light) so the UI can
+      // Load a past run's URLs + label + learn mode back into the form and re-run it.
+      const v = scoperView(job); v.urls = job.urls || [];
+      return sendJson(res, 200, v);
     }
     const scoperFiles = pathname.match(/^\/api\/scoper\/runs\/([^/]+)\/files\/(.*)$/);
     if (scoperFiles && req.method === 'GET') {
