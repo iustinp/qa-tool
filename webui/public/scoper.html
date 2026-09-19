@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scoper — source-site block inventory</title>
+<style>
+  :root { --bg:#eef0f3; --panel:#fff; --line:#d8d8d8; --ink:#1c1c1c; --muted:#666; --green:#1a9e6a; --greenD:#158a5c; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; } /* a class's display: must not defeat the hidden attribute */
+  html, body { margin: 0; height: 100%; font: 13px system-ui, -apple-system, sans-serif; color: var(--ink); background: var(--bg); }
+  body { display: flex; flex-direction: column; }
+  header.top { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header.top b { font-size: 15px; }
+  header.top .hint { color: #999; font-size: 11px; margin-left: auto; }
+  .layout { flex: 1; display: grid; grid-template-columns: 340px 300px 1fr; min-height: 0; }
+  .panel { border-right: 1px solid var(--line); background: var(--panel); overflow: auto; padding: 14px; }
+  .panel.results { padding: 0; background: var(--bg); display: flex; flex-direction: column; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 10px; }
+  .field { display: block; margin-bottom: 12px; }
+  .field > span { display: block; font-weight: 600; margin-bottom: 4px; }
+  .field em { color: var(--muted); font-weight: 400; font-style: normal; }
+  input[type=text], input[type=number], textarea { width: 100%; padding: 6px 9px; border: 1px solid #bbb; border-radius: 6px; font: 12px ui-monospace, SFMono-Regular, monospace; }
+  textarea { resize: vertical; }
+  .row { display: flex; gap: 10px; }
+  .row .field { flex: 1; }
+  button { font: 13px system-ui; padding: 6px 12px; border: 1px solid #bbb; border-radius: 6px; background: #f3f3f3; cursor: pointer; }
+  button.primary { background: var(--green); color: #fff; border-color: var(--greenD); }
+  button:disabled { opacity: .5; cursor: default; }
+  .link { background: none; border: none; color: var(--greenD); padding: 0; font-size: 12px; cursor: pointer; text-decoration: underline; }
+  .msg { color: var(--muted); font-size: 12px; margin-left: 8px; }
+  .msg.err { color: #c0392b; }
+  .runs { display: flex; flex-direction: column; gap: 8px; }
+  .run { border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; cursor: pointer; background: #fff; }
+  .run:hover { border-color: #9fb; }
+  .run.active { border-color: var(--green); box-shadow: 0 0 0 2px rgba(26,158,106,.18); }
+  .run .site { font-weight: 600; word-break: break-all; }
+  .run .meta { color: var(--muted); font-size: 11px; margin-top: 3px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .badge { font-size: 10px; padding: 1px 6px; border-radius: 10px; text-transform: uppercase; letter-spacing: .03em; }
+  .badge.done { background: #e3f6ec; color: #157a4e; }
+  .badge.running, .badge.queued { background: #fff3d6; color: #8a6100; }
+  .badge.error { background: #fbe3e0; color: #b0281a; }
+  .badge.learn { background: #dfeeff; color: #1c5fa8; }
+  .meta.sc { color: #0e7a4e; font-weight: 600; }
+  .run .del { float: right; color: #b00; background: none; border: none; font-size: 14px; cursor: pointer; padding: 0 2px; }
+  .run .rerender { float: right; color: var(--greenD); background: none; border: none; font-size: 15px; cursor: pointer; padding: 0 4px; line-height: 1; }
+  .run .rerender:hover { color: var(--green); }
+  .run .loadbtn { float: right; color: var(--muted); background: none; border: none; font-size: 15px; cursor: pointer; padding: 0 4px; line-height: 1; }
+  .run .loadbtn:hover { color: var(--green); }
+  .empty { color: #999; font-style: italic; padding: 6px 2px; }
+  .panel-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  .panel-head h2 { margin: 0; }
+  .panel-head .sp { flex: 1; }
+  iframe { flex: 1; width: 100%; border: 0; background: var(--bg); }
+  .placeholder { flex: 1; display: flex; align-items: center; justify-content: center; color: #aaa; font-size: 13px; }
+  .phead { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .phead h2 { margin: 0; }
+  .collapse-btn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 4px; }
+  .collapse-btn:hover { color: var(--ink); }
+  .rail { display: none; }
+  .panel.collapsed { padding: 0; overflow: hidden; }
+  .panel.collapsed > :not(.rail) { display: none; }
+  .panel.collapsed .rail { display: flex; align-items: flex-start; justify-content: center; height: 100%; padding-top: 12px; }
+  .rail .exp { writing-mode: vertical-rl; transform: rotate(180deg); background: none; border: none; color: var(--muted); cursor: pointer; font: 600 12px system-ui; letter-spacing: .04em; text-transform: uppercase; padding: 6px 2px; }
+  .rail .exp:hover { color: var(--green); }
+</style>
+</head>
+<body>
+  <header class="top">
+    <b>Scoper</b>
+    <span>source-site block inventory</span>
+    <span class="hint">isolated tool · reachable only at /scoper · not linked from the main UI</span>
+  </header>
+
+  <div class="layout">
+    <!-- New run -->
+    <section class="panel" id="formPanel">
+      <div class="rail"><button class="exp" data-col="form" title="Expand">New scope run ›</button></div>
+      <div class="phead"><h2 style="flex:1">New scope run</h2><button class="collapse-btn" data-col="form" title="Collapse">‹</button></div>
+      <label class="field">
+        <span>Label <em>(optional)</em></span>
+        <input id="label" type="text" placeholder="e.g. usta-foundation" spellcheck="false">
+      </label>
+      <label class="field">
+        <span>
+          Source URLs — one per line
+          <button type="button" id="browse" class="link">Upload CSV…</button>
+          <input id="csv" type="file" accept=".csv,text/csv" hidden>
+        </span>
+        <textarea id="urls" rows="10" wrap="off" spellcheck="false"
+          placeholder="https://www.example.com/&#10;https://www.example.com/about&#10;https://www.example.com/news/article"></textarea>
+      </label>
+      <label class="field" style="max-width:130px">
+        <span>Scan threads</span>
+        <input id="conc" type="number" min="1" max="8" step="1" value="4">
+      </label>
+      <label class="field learn-field" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:#f2fbf6">
+        <input id="learn" type="checkbox" style="width:auto;margin:2px 0 0">
+        <span style="margin:0;font-weight:600">Learning mode <em>(EDS pages)</em><br>
+          <em style="font-weight:400">Feed already-migrated EDS URLs. The tool reads each page's DOM as
+          ground truth, scores its own detection, and pre-loads the corrections — hit Analyze to learn.</em></span>
+      </label>
+      <div>
+        <button id="run" class="primary">Scan &amp; scope</button>
+        <span id="msg" class="msg"></span>
+      </div>
+      <p class="msg" style="margin:14px 0 0">A run captures each URL (pears + screenshot), then builds the
+        cross-page block inventory. One-column CSVs are read in your browser and appended above.</p>
+    </section>
+
+    <!-- Runs history -->
+    <section class="panel" id="runsPanel">
+      <div class="rail"><button class="exp" data-col="runs" title="Expand">Runs ›</button></div>
+      <div class="phead">
+        <h2 style="flex:1">Runs</h2>
+        <button id="refresh" class="link">Refresh</button>
+        <button class="collapse-btn" data-col="runs" title="Collapse">‹</button>
+      </div>
+      <div id="runs" class="runs"></div>
+    </section>
+
+    <!-- Results -->
+    <section class="panel results">
+      <div class="panel-head">
+        <h2 id="resTitle">Inventory</h2>
+        <span class="sp"></span>
+        <button id="closeRes" class="link" hidden>Close</button>
+      </div>
+      <div id="resPlaceholder" class="placeholder">Select or start a run to see its block inventory.</div>
+      <iframe id="frame" title="scoper inventory" hidden></iframe>
+    </section>
+  </div>
+
+<script>
+  var $ = function (id) { return document.getElementById(id); };
+  var urlsEl = $('urls'), labelEl = $('label'), concEl = $('conc');
+  var runBtn = $('run'), msgEl = $('msg'), runsEl = $('runs');
+  var frame = $('frame'), resTitle = $('resTitle'), resPh = $('resPlaceholder'), closeRes = $('closeRes');
+  var activeId = null;
+  var lastRuns = [];
+
+  // --- CSV upload: read client-side, append http(s) URLs to the textarea (no server multipart). ---
+  $('browse').onclick = function () { $('csv').click(); };
+  $('csv').onchange = function (e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      var rows = String(reader.result).split(/[\r\n]+/)
+        .map(function (l) { return l.split(/[;,]/)[0].trim(); })
+        .filter(function (u) { return /^https?:\/\//i.test(u); });
+      var existing = urlsEl.value.trim();
+      urlsEl.value = (existing ? existing + '\n' : '') + rows.join('\n');
+      msgEl.className = 'msg'; msgEl.textContent = '+' + rows.length + ' URLs from ' + file.name;
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  // --- Start a run ---
+  runBtn.onclick = function () {
+    var urls = urlsEl.value.trim();
+    if (!urls) { fail('Enter at least one URL, or upload a CSV.'); return; }
+    runBtn.disabled = true; msgEl.className = 'msg'; msgEl.textContent = 'starting…';
+    fetch('/api/scoper/runs', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ urls: urls, label: labelEl.value.trim(), concurrency: Number(concEl.value) || 4, learn: $('learn').checked })
+    }).then(function (r) { return r.json(); }).then(function (j) {
+      runBtn.disabled = false;
+      if (!j.jobId) { fail(j.error || 'could not start'); return; }
+      msgEl.textContent = ''; open_(j.jobId); refresh();
+    }).catch(function (e) { runBtn.disabled = false; fail(String(e)); });
+  };
+  function fail(m) { msgEl.className = 'msg err'; msgEl.textContent = m; }
+
+  // --- Runs list (single 1.2s poller drives live updates) ---
+  function refresh() {
+    return fetch('/api/scoper/runs').then(function (r) { return r.json(); }).then(function (j) {
+      lastRuns = j.runs || []; render(lastRuns);
+      // Keep the open run's inventory in sync as it progresses/finishes.
+      var act = lastRuns.filter(function (r) { return r.id === activeId; })[0];
+      if (act && !(act.status === 'done' && frame.getAttribute('src') === act.visualUrl)) syncActive(act);
+      return lastRuns;
+    });
+  }
+  function render(runs) {
+    if (!runs.length) { runsEl.innerHTML = '<div class="empty">No runs yet.</div>'; return; }
+    runsEl.innerHTML = '';
+    runs.forEach(function (r) {
+      var el = document.createElement('div');
+      el.className = 'run' + (r.id === activeId ? ' active' : '');
+      var when = new Date(r.createdAt).toLocaleString();
+      var st = r.status || 'queued';
+      var counts = [];
+      if (r.urlCount != null) counts.push(r.urlCount + ' URLs');
+      if (r.blockCount != null) counts.push(r.blockCount + ' block types');
+      el.innerHTML =
+        '<button class="del" title="Delete run">✕</button>' +
+        (r.corpus && (st === 'done' || st === 'error') ? '<button class="rerender" title="Re-render the inventory with the latest tool + your saved corrections">↻</button>' : '') +
+        '<button class="loadbtn" title="Load this run\'s URLs + settings into the form">⇱</button>' +
+        '<div class="site">' + esc(r.label || r.siteHost || r.id.slice(0, 8)) + '</div>' +
+        '<div class="meta">' +
+          '<span class="badge ' + st + '">' + st + (st !== 'done' && st !== 'error' && r.stage ? ' · ' + esc(r.stage) : '') + '</span>' +
+          (r.learn ? '<span class="badge learn" title="Learning mode — scored against the page DOM">EDS learn</span>' : '') +
+          (r.siteHost ? '<span>' + esc(r.siteHost) + '</span>' : '') +
+          (counts.length ? '<span>' + counts.join(' · ') + '</span>' : '') +
+          '<span>' + when + '</span>' +
+        '</div>' +
+        (r.scorecard ? '<div class="meta sc">📊 recall ' + pctv(r.scorecard.recall) + ' · precision ' + pctv(r.scorecard.precision) + ' · type ' + pctv(r.scorecard.typeConsistency) + (r.scorecard.gtBlocks != null ? ' · ' + r.scorecard.gtBlocks + ' GT blocks' : '') + '</div>' : '') +
+        (r.error ? '<div class="meta" style="color:#b0281a">' + esc(String(r.error).slice(0, 160)) + '</div>' : '');
+      el.onclick = function (ev) { if (ev.target.classList.contains('del') || ev.target.classList.contains('rerender') || ev.target.classList.contains('loadbtn')) return; open_(r.id); };
+      el.querySelector('.del').onclick = function () { del(r.id); };
+      var rr = el.querySelector('.rerender'); if (rr) rr.onclick = function () { rerender(r); };
+      var lb = el.querySelector('.loadbtn'); if (lb) lb.onclick = function (ev) { ev.stopPropagation(); loadRun(r.id); };
+      runsEl.appendChild(el);
+    });
+  }
+  // Load a past run's URLs + label + learn mode back into the form, so you can re-run a learning/scoping
+  // pass over the same page list (e.g. after improving the tool). The captured corpus stays on the run;
+  // only re-running from the form re-scans — a plain re-render (↻) or Analyze reuses the cached pears.
+  function loadRun(id) {
+    fetch('/api/scoper/runs/' + id).then(function (r) { return r.json(); }).then(function (j) {
+      if (j.urls && j.urls.length) urlsEl.value = j.urls.join('\n');
+      if (j.label) labelEl.value = j.label;
+      if (j.concurrency) concEl.value = j.concurrency;
+      $('learn').checked = !!j.learn; runBtn.textContent = j.learn ? 'Scan & learn' : 'Scan & scope';
+      if (collapsed.form) { collapsed.form = false; $('formPanel').classList.remove('collapsed'); updateGrid(); }
+      urlsEl.focus();
+      msgEl.className = 'msg'; msgEl.textContent = 'Loaded ' + (j.urls ? j.urls.length : 0) + ' URLs from "' + esc(j.label || id.slice(0, 8)) + '" — edit & run.';
+    }).catch(function (e) { fail(String(e)); });
+  }
+
+  function del(id) {
+    if (!confirm('Delete this run and its captured corpus?')) return;
+    fetch('/api/scoper/runs/' + id, { method: 'DELETE' }).then(function () {
+      if (activeId === id) { activeId = null; showFrame(null); }
+      refresh();
+    });
+  }
+
+  // Re-render a run's inventory with the current tool code, re-applying its saved corrections as
+  // overrides (no re-learning). The inventory is a static file baked at scope time, so this is how a
+  // past run picks up UI/logic changes without a full re-scan.
+  function rerender(r) {
+    // Re-render applies the run's server-side (absorbed) corrections as overrides — no need to send
+    // the local flags; pending, un-analyzed marks stay pending until you Analyze them.
+    if (activeId === r.id) { showFrame(null); resPh.textContent = 'Re-rendering…'; }
+    fetch('/api/scoper/scope', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ corpus: r.corpus, label: r.label }) })
+      .then(function (x) { return x.json(); }).then(function (j) { if (j.jobId) pollRerender(j.jobId, r.id); })
+      .catch(function () { refresh(); });
+  }
+  function pollRerender(jobId, runId) {
+    fetch('/api/scoper/runs/' + jobId).then(function (x) { return x.json(); }).then(function (j) {
+      if (j.status === 'done') { refresh().then(function () { if (activeId === runId) open_(runId); }); }
+      else if (j.status === 'error') { refresh(); if (activeId === runId) { showFrame(null); resPh.textContent = 'Re-render failed: ' + (j.error || ''); } }
+      else { setTimeout(function () { pollRerender(jobId, runId); }, 800); }
+    }).catch(function () { setTimeout(function () { pollRerender(jobId, runId); }, 1200); });
+  }
+
+  // --- Open a run's inventory ---
+  function open_(id) {
+    activeId = id;
+    fetch('/api/scoper/runs/' + id).then(function (r) { return r.json(); }).then(function (j) {
+      syncActive(j); render(lastRuns);
+    });
+  }
+  function syncActive(j) {
+    resTitle.textContent = 'Inventory — ' + esc(j.label || j.siteHost || j.id.slice(0, 8));
+    if (j.status === 'done' && j.visualUrl) showFrame(j.visualUrl);
+    else if (j.status === 'error') { showFrame(null); resPh.textContent = 'Run failed: ' + (j.error || ''); }
+    else { showFrame(null); resPh.textContent = 'Run in progress (' + (j.stage || j.status) + ')…'; }
+  }
+  function showFrame(url) {
+    if (url) { if (frame.getAttribute('src') !== url) frame.src = url; frame.hidden = false; resPh.hidden = true; closeRes.hidden = false; }
+    else { frame.hidden = true; frame.removeAttribute('src'); resPh.hidden = false; closeRes.hidden = true; }
+  }
+  closeRes.onclick = function () { activeId = null; showFrame(null); render(lastRuns); };
+
+  // Single background poller: refresh whenever any run is still live.
+  setInterval(function () {
+    var live = lastRuns.some(function (r) { return r.status === 'running' || r.status === 'queued'; });
+    if (live) refresh();
+  }, 1200);
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function pctv(x) { return Math.round((x || 0) * 100) + '%'; }
+
+  // Reflect learning mode in the run button so it's clear what pressing it does.
+  $('learn').addEventListener('change', function () { runBtn.textContent = this.checked ? 'Scan & learn' : 'Scan & scope'; });
+
+  $('refresh').onclick = refresh;
+
+  // --- Collapsible left columns (give the inventory more room) ---
+  var collapsed = { form: false, runs: false };
+  function updateGrid() {
+    document.querySelector('.layout').style.gridTemplateColumns =
+      (collapsed.form ? '34px' : '340px') + ' ' + (collapsed.runs ? '34px' : '300px') + ' 1fr';
+  }
+  document.querySelectorAll('[data-col]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var k = btn.dataset.col;
+      collapsed[k] = !collapsed[k];
+      $(k === 'form' ? 'formPanel' : 'runsPanel').classList.toggle('collapsed', collapsed[k]);
+      updateGrid();
+    });
+  });
+
+  refresh();
+</script>
+</body>
+</html>

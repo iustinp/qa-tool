@@ -535,6 +535,21 @@ function parseSelectors(input) {
   return list.map((s) => String(s).trim()).filter(Boolean);
 }
 
+// Scoper URL list: array or newline/comma text; keep only http(s) URLs, dedup, cap.
+function parseUrlList(input) {
+  const list = Array.isArray(input) ? input : String(input || '').split(/[\r\n,]+/);
+  const seen = new Set();
+  const out = [];
+  for (const raw of list) {
+    const u = String(raw).trim();
+    if (!u || u.startsWith('#') || !/^https?:\/\//i.test(u) || seen.has(u)) continue;
+    seen.add(u);
+    out.push(u);
+    if (out.length >= 500) break;
+  }
+  return out;
+}
+
 // --- Named site recipes (git-tracked YAML in RECIPES_DIR) ----------------------
 function safeRecipeName(name) {
   return String(name || '')
@@ -646,6 +661,227 @@ function serveStatic(res, baseDir, urlPath, fallback) {
     res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
     fs.createReadStream(filePath).pipe(res);
   });
+}
+
+// ===== SCOPER (issue #65) — isolated source-scoping tool, reachable ONLY by hand-typing /scoper.
+// Deliberately kept separate from the main run machinery (its own job map/queue) so scoper jobs
+// never appear in the main runs list and nothing here touches the main UI. Spawns the scoper CLIs.
+const SCOPER_ROOT = path.join(PROJECT_ROOT, 'scoper');
+const SCOPER_RUNS = path.join(RUNS_DIR, 'scoper'); // webui/runs/scoper/<id>/ (gitignored)
+fs.mkdirSync(SCOPER_RUNS, { recursive: true });
+const scoperJobs = new Map();
+const scoperQueue = [];
+let scoperRunning = 0;
+
+// Fields mirrored to <dir>/job.json so scoper history survives a restart (the live
+// child, the log tail, and the raw corrections are not persisted — recomputed/dropped).
+const SCOPER_PERSIST = [
+  'id', 'kind', 'label', 'urls', 'concurrency', 'corpus', 'runId', 'learn', 'scorecard',
+  'status', 'stage', 'error', 'visualUrl', 'siteHost', 'urlCount', 'blockCount',
+  'createdAt', 'updatedAt',
+];
+
+function scoperPersist(job) {
+  try {
+    fs.mkdirSync(job.dir, { recursive: true });
+    const data = {};
+    for (const k of SCOPER_PERSIST) if (job[k] !== undefined) data[k] = job[k];
+    fs.writeFileSync(path.join(job.dir, 'job.json'), JSON.stringify(data));
+  } catch { /* best-effort */ }
+}
+
+function loadPersistedScoperJobs() {
+  let ids = [];
+  try { ids = fs.readdirSync(SCOPER_RUNS); } catch { return; }
+  let restored = 0;
+  for (const id of ids) {
+    const dir = path.join(SCOPER_RUNS, id);
+    let data;
+    try { data = JSON.parse(fs.readFileSync(path.join(dir, 'job.json'), 'utf8')); } catch { continue; }
+    const job = { ...data, dir, log: '', child: null, corrections: null };
+    // A run mid-flight when the server stopped can't resume — mark it interrupted.
+    if (job.status !== 'done' && job.status !== 'error') {
+      job.status = 'error'; job.stage = 'interrupted'; job.error = 'Interrupted by a server restart.';
+    }
+    scoperJobs.set(job.id, job);
+    restored += 1;
+  }
+  if (restored) console.log(`[webui] restored ${restored} scoper run(s) from disk`);
+}
+
+function hostOfSafe(u) { try { return new URL(u).host; } catch { return null; } }
+
+function scoperPump() {
+  while (scoperRunning < MAX_CONCURRENT && scoperQueue.length) {
+    const id = scoperQueue.shift();
+    const job = scoperJobs.get(id);
+    if (!job) continue;
+    scoperRunning += 1;
+    runScoperJob(job)
+      .catch((e) => { job.status = 'error'; job.error = String(e); scoperPersist(job); })
+      .finally(() => { scoperRunning -= 1; scoperPump(); });
+  }
+}
+
+function newScoperJob(spec) {
+  const id = randomUUID();
+  const urls = Array.isArray(spec.urls) ? spec.urls : [];
+  const job = {
+    id, kind: spec.kind, label: (spec.label || 'scoper').replace(/[^a-z0-9_-]+/gi, '-').slice(0, 40),
+    corpus: spec.corpus || null, corrections: spec.corrections || null, learn: !!spec.learn,
+    urls, urlCount: urls.length, concurrency: Math.min(8, Math.max(1, Number(spec.concurrency) || 4)),
+    runId: spec.runId || null, siteHost: urls.length ? hostOfSafe(urls[0]) : (spec.siteHost || null),
+    status: 'queued', stage: 'queued', error: null, log: '', visualUrl: null, blockCount: null,
+    dir: path.join(SCOPER_RUNS, id), createdAt: Date.now(), updatedAt: Date.now(),
+  };
+  scoperJobs.set(id, job);
+  scoperPersist(job);
+  scoperQueue.push(id);
+  scoperPump();
+  return job;
+}
+
+function spawnScoper(job, args, cwd) {
+  return new Promise((resolve) => {
+    job.status = 'running'; job.updatedAt = Date.now(); scoperPersist(job);
+    // SCOPER_WEB tells scope.js to render the visual in server mode (Analyze -> fetch, not CLI).
+    const child = spawn(process.execPath, args, { cwd, env: { ...process.env, SCOPER_WEB: job.corpus || '', SCOPER_CORRECTIONS: job.correctionsPath || '', SCOPER_SEED_CORRECTIONS: job.seedPath || '', SCOPER_SCORECARD: job.scorecardPath || '' } });
+    job.child = child;
+    const onc = (d) => {
+      const text = d.toString();
+      job.log = tail(job.log + text, 8000); job.updatedAt = Date.now();
+      const m = text.match(/\[(\d+)\/(\d+)\]/); // scan/scope emit "[i/N]" progress
+      if (m) { job.stage = `${job.stage.split(' · ')[0]} · ${m[1]}/${m[2]}`; }
+    };
+    child.stdout.on('data', onc); child.stderr.on('data', onc);
+    child.on('error', (e) => { job.status = 'error'; job.error = `spawn failed: ${e.message}`; resolve(false); });
+    child.on('close', (code) => { job.child = null; if (code !== 0) { job.status = 'error'; job.error = `exit ${code}\n${tail(job.log, 800)}`; } resolve(code === 0); });
+  });
+}
+
+async function runScoperJob(job) {
+  fs.mkdirSync(job.dir, { recursive: true });
+
+  // A scan-first RUN: capture pears for the URL list into <dir>/corpus, then scope it.
+  if (job.kind === 'run') {
+    if (!job.urls.length) { job.status = 'error'; job.error = 'no URLs to scan'; scoperPersist(job); return; }
+    const corpusDir = path.join(job.dir, 'corpus');
+    job.corpus = corpusDir;
+    const urlsCsv = path.join(job.dir, 'urls.csv');
+    fs.writeFileSync(urlsCsv, job.urls.join('\n'));
+    job.stage = 'scan'; scoperPersist(job);
+    const scanned = await spawnScoper(job, [path.join(SCOPER_ROOT, 'scan.js'), urlsCsv, corpusDir, String(job.concurrency)], PROJECT_ROOT);
+    if (!scanned) { scoperPersist(job); return; }
+
+    // LEARNING MODE (EDS): capture the page DOM as ground truth, grade detection against it, and seed the
+    // resulting scorecard + auto-corrections into the visual (best-effort — a non-EDS/unreachable corpus
+    // just falls through to a normal scope). eds-oracle.js and align.js never touch detection.
+    if (job.learn) {
+      job.stage = 'oracle'; scoperPersist(job);
+      const oracled = await spawnScoper(job, [path.join(SCOPER_ROOT, 'eds-oracle.js'), corpusDir, String(job.concurrency)], PROJECT_ROOT);
+      if (oracled) {
+        job.stage = 'align'; scoperPersist(job);
+        await spawnScoper(job, [path.join(SCOPER_ROOT, 'align.js'), corpusDir, path.join(SCOPER_ROOT, 'store.json')], PROJECT_ROOT);
+        const scPath = path.join(corpusDir, 'scorecard.json');
+        const seedPath = path.join(corpusDir, 'eds-corrections.json');
+        try {
+          const sc = JSON.parse(fs.readFileSync(scPath, 'utf8'));
+          job.scorecard = { pages: sc.pages, gtBlocks: sc.gtBlocks, recall: sc.recall, precision: sc.precision, typeConsistency: sc.typeConsistency, meanIoU: sc.meanIoU, missedBlocks: sc.missedBlocks };
+        } catch { /* no scorecard */ }
+        if (fs.existsSync(scPath)) job.scorecardPath = scPath;
+        if (fs.existsSync(seedPath)) job.seedPath = seedPath;
+      }
+      job.error = null; // learning is best-effort; proceed to scope regardless of oracle/align outcome
+    }
+  }
+
+  if (job.kind === 'analyze') {
+    const pearsDir = fs.existsSync(path.join(job.corpus, 'pairs')) ? path.join(job.corpus, 'pairs') : job.corpus;
+    const corrPath = path.join(job.dir, 'corrections.json');
+    fs.writeFileSync(corrPath, JSON.stringify(job.corrections || {}));
+    job.correctionsPath = corrPath; // also fed to the re-scope so corrections apply as exact overrides
+    job.stage = 'analyze'; scoperPersist(job);
+    const ok = await spawnScoper(job, [path.join(SCOPER_ROOT, 'analyze.js'), corrPath, pearsDir, path.join(SCOPER_ROOT, 'store.json')], PROJECT_ROOT);
+    if (!ok) { scoperPersist(job); return; } // analyze failed -> leave job in error, don't re-scope
+    job.summary = summarizeAnalyze(job.log); // one-line "what the store learned", surfaced in the UI
+    scoperPersist(job);
+    // Persist the run's CUMULATIVE corrections server-side (the durable override source): analyze.js
+    // learned from THIS batch; the re-scope + every later re-render apply the merged set. This lets the
+    // UI clear its correction flags after Analyze without the overrides reverting ("clear once absorbed").
+    if (job.runId) {
+      const runCorr = path.join(SCOPER_RUNS, job.runId, 'corrections.json');
+      let cum = {};
+      try { if (fs.existsSync(runCorr)) cum = JSON.parse(fs.readFileSync(runCorr, 'utf8')); } catch { /* start fresh */ }
+      Object.assign(cum, job.corrections || {}); // newest correction wins per band id
+      try { fs.mkdirSync(path.dirname(runCorr), { recursive: true }); fs.writeFileSync(runCorr, JSON.stringify(cum)); } catch { /* best effort */ }
+      job.correctionsPath = runCorr; // re-scope with the cumulative set, not just this batch
+    }
+  }
+
+  // A re-render (kind 'scope'): apply overrides from any corrections sent, else the run's persisted set.
+  if (job.corrections && Object.keys(job.corrections).length && !job.correctionsPath) {
+    const corrPath = path.join(job.dir, 'corrections.json');
+    fs.writeFileSync(corrPath, JSON.stringify(job.corrections));
+    job.correctionsPath = corrPath;
+  } else if (!job.correctionsPath && job.runId) {
+    const runCorr = path.join(SCOPER_RUNS, job.runId, 'corrections.json');
+    if (fs.existsSync(runCorr)) job.correctionsPath = runCorr; // durable overrides survive re-render
+  }
+  // (re-)scope with the current store; cwd = job dir so scoper-run_visual-* lands isolated here.
+  job.stage = 'scope'; scoperPersist(job);
+  const ok = await spawnScoper(job, [path.join(SCOPER_ROOT, 'scope.js'), job.corpus, job.label], job.dir);
+  if (!ok) { scoperPersist(job); return; }
+  const vis = fs.readdirSync(job.dir).find((d) => d.startsWith('scoper-run_visual-'));
+  job.visualUrl = vis ? `/api/scoper/runs/${job.id}/files/${vis}/index.html` : null;
+  job.blockCount = readBlockCount(job.corpus);
+  if (job.kind === 'analyze' && job.summary != null) job.summary += ` · re-scope → ${job.blockCount != null ? job.blockCount : '?'} block types`;
+  job.status = 'done'; job.stage = 'done'; job.updatedAt = Date.now();
+
+  // An analyze/re-render job belongs to an existing run — point that run at the fresh inventory so
+  // re-analysis (and a plain re-render) stick in the history (corpus = <runDir>/corpus).
+  if (job.runId) {
+    const parent = scoperJobs.get(job.runId);
+    if (parent) { parent.visualUrl = job.visualUrl; parent.blockCount = job.blockCount; parent.updatedAt = Date.now(); scoperPersist(parent); }
+  }
+  scoperPersist(job);
+}
+
+// scope.js writes <corpus>/inventory.json ({pages, blocks:[...]}); read the type count for the list.
+function readBlockCount(corpus) {
+  try {
+    const inv = JSON.parse(fs.readFileSync(path.join(corpus, 'inventory.json'), 'utf8'));
+    return Array.isArray(inv.blocks) ? inv.blocks.length : null;
+  } catch { return null; }
+}
+
+// Distil analyze.js stdout into a one-line "what the store learned" for the UI (silent-reload fix).
+function summarizeAnalyze(log) {
+  const applied = (log.match(/applied (\d+) corrections/) || [])[1];
+  const tally = (log.match(/(\d+) confirmed · (\d+) reassign · (\d+) new-type · (\d+) fragment · (\d+) split · (\d+) not-block · (\d+) region/) || []);
+  const acc = (log.match(/accuracy over \d+ accumulated corrections: (\d+)%/) || [])[1];
+  const tuned = (log.match(/\(tuned\)/g) || []).length;
+  const bits = [];
+  if (applied) bits.push(`learned ${applied} correction${applied === '1' ? '' : 's'}`);
+  if (tally.length) {
+    const parts = [];
+    if (+tally[1]) parts.push(`${tally[1]} confirmed`);
+    if (+tally[2]) parts.push(`${tally[2]} relabel`);
+    if (+tally[3]) parts.push(`${tally[3]} new-type`);
+    if (+tally[4]) parts.push(`${tally[4]} fragment`);
+    if (+tally[5]) parts.push(`${tally[5]} split`);
+    if (+tally[6]) parts.push(`${tally[6]} not-block`);
+    if (+tally[7]) parts.push(`${tally[7]} region`);
+    if (parts.length) bits.push(parts.join(' + '));
+  }
+  bits.push(tuned ? `${tuned} type${tuned === 1 ? '' : 's'} self-tuned` : 'no radius widened yet (need ≥2 of a type)');
+  if (acc) bits.push(`regression ${acc}%`);
+  return bits.join(' · ');
+}
+
+// Public view of a scoper job (no child/log/raw corrections).
+function scoperView(job) {
+  const { child, log, corrections, dir, urls, ...rest } = job;
+  return rest;
 }
 
 // ---- Router -------------------------------------------------------------------
@@ -770,6 +1006,69 @@ const server = http.createServer(async (req, res) => {
       return serveStatic(res, SAMPLE_RESULTS, 'placeholder.svg', null);
     }
 
+    // --- Scoper (isolated; reachable only by hand-typing /scoper — no links from the main UI) ---
+    if (pathname === '/scoper' && req.method === 'GET') {
+      return serveStatic(res, PUBLIC_DIR, '/scoper.html', null); // null fallback => real 404, not the main page
+    }
+    // Scan-first RUN: capture a URL list into a per-run corpus, then scope it (the main UI path).
+    if (pathname === '/api/scoper/runs' && req.method === 'POST') {
+      const body = await readBody(req);
+      const urls = parseUrlList(body.urls);
+      if (!urls.length) return sendJson(res, 400, { error: 'Enter at least one URL (or upload a one-column CSV).' });
+      const job = newScoperJob({ kind: 'run', urls, label: body.label, concurrency: body.concurrency, learn: !!body.learn });
+      return sendJson(res, 201, { jobId: job.id });
+    }
+    if (pathname === '/api/scoper/runs' && req.method === 'GET') {
+      const list = [...scoperJobs.values()]
+        .filter((j) => j.kind === 'run')
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .map(scoperView);
+      return sendJson(res, 200, { runs: list });
+    }
+    // Scope an already-scanned corpus — CLI parity, and the main UI's "Re-render" (regenerate the
+    // inventory with the current code, applying stored corrections as overrides, WITHOUT re-learning).
+    if (pathname === '/api/scoper/scope' && req.method === 'POST') {
+      const body = await readBody(req);
+      if (!body.corpus) return sendJson(res, 400, { error: 'corpus path required' });
+      const corpus = path.resolve(PROJECT_ROOT, body.corpus);
+      const runId = path.dirname(corpus).startsWith(SCOPER_RUNS) ? path.basename(path.dirname(corpus)) : null;
+      const job = newScoperJob({ kind: 'scope', corpus, label: body.label, runId, corrections: body.corrections || null });
+      return sendJson(res, 201, { jobId: job.id });
+    }
+    if (pathname === '/api/scoper/analyze' && req.method === 'POST') {
+      const body = await readBody(req);
+      if (!body.corpus) return sendJson(res, 400, { error: 'corpus path required' });
+      const corpus = path.resolve(PROJECT_ROOT, body.corpus);
+      // If the corpus is a run's own corpus dir, link back so the re-scope updates that run's history.
+      const runId = path.dirname(corpus).startsWith(SCOPER_RUNS) ? path.basename(path.dirname(corpus)) : null;
+      const job = newScoperJob({ kind: 'analyze', corpus, corrections: body.corrections || {}, label: body.label, runId });
+      return sendJson(res, 201, { jobId: job.id });
+    }
+    const scoperRunDelete = pathname.match(/^\/api\/scoper\/runs\/([^/]+)$/);
+    if (scoperRunDelete && req.method === 'DELETE') {
+      const job = scoperJobs.get(scoperRunDelete[1]);
+      if (!job) return sendJson(res, 404, { error: 'not found' });
+      try { if (job.child) job.child.kill(); } catch { /* gone */ }
+      scoperJobs.delete(job.id);
+      try { if (job.dir && job.dir.startsWith(SCOPER_RUNS)) fs.rmSync(job.dir, { recursive: true, force: true }); } catch { /* best effort */ }
+      return sendJson(res, 200, { ok: true });
+    }
+    const scoperRun = pathname.match(/^\/api\/scoper\/runs\/([^/]+)$/);
+    if (scoperRun && req.method === 'GET') {
+      const job = scoperJobs.get(scoperRun[1]);
+      if (!job) return sendJson(res, 404, { error: 'not found' });
+      // Single-run detail includes the URL list (the runs LIST omits it to stay light) so the UI can
+      // Load a past run's URLs + label + learn mode back into the form and re-run it.
+      const v = scoperView(job); v.urls = job.urls || [];
+      return sendJson(res, 200, v);
+    }
+    const scoperFiles = pathname.match(/^\/api\/scoper\/runs\/([^/]+)\/files\/(.*)$/);
+    if (scoperFiles && req.method === 'GET') {
+      const job = scoperJobs.get(scoperFiles[1]);
+      if (!job) return void (res.writeHead(404), res.end('Not found'));
+      return serveStatic(res, job.dir, scoperFiles[2], null);
+    }
+
     if (req.method === 'GET') {
       const target = pathname === '/' ? '/index.html' : pathname;
       return serveStatic(res, PUBLIC_DIR, target, '/index.html');
@@ -782,6 +1081,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 loadPersistedJobs(); // restore run history from disk before accepting requests
+loadPersistedScoperJobs(); // restore isolated scoper run history too
 
 server.listen(PORT, () => {
   // eslint-disable-next-line no-console

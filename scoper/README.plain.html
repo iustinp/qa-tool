@@ -1,0 +1,30 @@
+<div><h1 id="scoper--deterministic-source-site-scoping-via-recurring-pear-signatures">scoper — deterministic source-site scoping via recurring pear signatures</h1>
+<p>Experimental (issue #65, branch <code>experiment/source-scoping</code>). Reuses the canonical-layout
+("pear") representation to <strong>discover reusable block structures across a source site</strong> —
+programmatically, deterministically, no AI — as a fast precursor to EDS migration scoping.</p>
+<h2 id="isolation-contract-important">Isolation contract (important)</h2>
+<p>This directory is <strong>purely additive</strong>. It:</p>
+<ul>
+<li>imports pear code from <code>../lib</code> <strong>read-only</strong>, and</li>
+<li><strong>never edits</strong> any existing file in the repo (<code>lib/</code>, <code>index.js</code>, …).</li>
+</ul>
+<p>That way the main project can keep evolving in parallel and this experiment merges cleanly
+(or is abandoned) with zero conflict. If something here ever <em>needs</em> data the pear doesn't
+expose, prefer a thin adapter here that post-processes pear output over editing <code>lib/</code>.</p>
+<h2 id="core-idea">Core idea</h2>
+<p>A pear is a framework-blind, styled, positioned point cloud of a page. A reusable block ≈ a
+<strong>recurring sub-constellation</strong> in that cloud. The signature of a block is built from what does
+NOT change when content grows — the <strong>style</strong> of each leaf and the <strong>topology</strong> between leaves —
+never the actual text/image content and never absolute pixel distances. That is what makes it
+elastic to content-length variation and framework-agnostic.</p>
+<p>See issue #65 for the full design and the fork decisions (B-first, site-global size tiers,
+images as first-class content-blind tokens).</p>
+<h2 id="poc-1--neighborhood-descriptor-recurrence-poc-neighborhoodjs">PoC 1 — neighborhood-descriptor recurrence (<code>poc-neighborhood.js</code>)</h2>
+<p>The cheapest probe of the core hypothesis, offline against existing pear JSON:
+for every node, build a content-blind <strong>neighborhood descriptor</strong> (its own style-token + the
+style-tokens and relative directions of its nearest neighbors) and count cross-page recurrence.</p>
+<p>Question it answers: do block-like neighborhoods (heterogeneous: image + heading + link nearby)
+separate from prose (homogeneous text)? And do distinct blocks form distinct descriptor groups?</p>
+<pre><code class="language-bash">node scoper/poc-neighborhood.js [runDir]
+# default runDir: test-run_grace_20260820231416/pairs
+</code></pre></div>
